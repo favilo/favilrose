@@ -93,7 +93,7 @@ fn main() -> Result<()> {
     let my_program_launcher = "dmenu_run";
     let my_file_manager = "thunar";
     let my_terminal = "alacritty";
-    let my_browser = "firefox"
+    let my_browser = "firefox";
 
     /* hooks
      *
