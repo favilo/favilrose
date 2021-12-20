@@ -93,6 +93,7 @@ fn main() -> Result<()> {
     let my_program_launcher = "dmenu_run";
     let my_file_manager = "thunar";
     let my_terminal = "alacritty";
+    let my_browser = "firefox"
 
     /* hooks
      *
@@ -140,6 +141,7 @@ fn main() -> Result<()> {
         "M-r" => run_external!(my_program_launcher);
         "M-Return" => run_external!(my_terminal);
         "M-f" => run_external!(my_file_manager);
+        "M-w" => run_external!(my_browser);
 
         // client management
         "M-j" => run_internal!(cycle_client, Forward);
@@ -166,7 +168,7 @@ fn main() -> Result<()> {
         "M-A-Left" => run_internal!(update_main_ratio, Less);
 
         "M-A-s" => run_internal!(detect_screens);
-        "M-A-Escape" => run_internal!(exit);
+        "M-S-q" => run_internal!(exit);
 
         // Each keybinding here will be templated in with the workspace index of each workspace,
         // allowing for common workspace actions to be bound at once.
