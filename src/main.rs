@@ -1,207 +1,93 @@
-/**
- * favilrose penrose :: based on penrose examples and current xmonad settings
- *
- * penrose does not have a traditional configuration file and is not typically set up by patching
- * the source code: it is more like Xmonad or Qtile in the sense that it is really a library for
- * writing your own window manager. Below is an example main.rs that can serve as a template should
- * you decide to write your own WM using penrose.
- */
-// TODO: Remove this extern crate
-#[macro_use]
-extern crate penrose;
-
+//! penrose :: minimal configuration
+//!
+//! This file will give you a functional if incredibly minimal window manager that
+//! has multiple workspaces and simple client / workspace movement.
+use color_eyre::eyre::{Context, Result};
 use penrose::{
-    contrib::{
-        extensions::Scratchpad,
-        hooks::{DefaultWorkspace, LayoutSymbolAsRootName},
-        layouts::paper,
+    builtin::{
+        actions::{exit, modify_with, send_layout_message, spawn},
+        layout::{
+            messages::{ExpandMain, IncMain, ShrinkMain},
+            transformers::{Gaps, ReflectHorizontal, ReserveTop},
+            MainAndStack, Monocle,
+        },
     },
     core::{
-        client::Client,
-        config::Config,
-        helpers::index_selectors,
-        hooks::Hook,
-        layout::{bottom_stack, side_stack, Layout, LayoutConf},
-        manager::WindowManager,
-        ring::Selector,
-        xconnection::XConn,
+        bindings::{parse_keybindings_with_xmodmap, KeyEventHandler},
+        layout::Layout,
+        Config, WindowManager,
     },
-    logging_error_handler,
-    xcb::{XcbConnection, XcbHooks},
-    Backward, Forward, Less, More, Result,
+    extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
+    map, stack,
+    x11rb::RustConn,
 };
 
-use simplelog::{LevelFilter, SimpleLogger};
-use std::collections::HashMap;
+use favilo_penrose::{
+    bar::status_bar,
+    hooks::{manage_hook, refresh_hooks},
+    BAR_HEIGHT_PX, STARTUP_SCRIPT, raw_key_bindings,
+};
 
-// An example of a simple custom hook. In this case we are creating a NewClientHook which will
-// be run each time a new client program is spawned.
-struct MyClientHook {}
-impl<X: XConn> Hook<X> for MyClientHook {
-    fn new_client(&mut self, wm: &mut WindowManager<X>, c: &mut Client) -> Result<()> {
-        wm.log(&format!("new client with WM_CLASS='{}'", c.wm_class()))
-    }
+use std::collections::HashMap;
+use tracing_subscriber::{self, prelude::*};
+
+
+
+fn layouts() -> penrose::pure::Stack<Box<dyn Layout>> {
+    let max_main = 1;
+    let ratio = 0.6;
+    let ratio_step = 0.1;
+    let outer_px = 0;
+    let inner_px = 0;
+
+    stack!(
+        MainAndStack::side(max_main, ratio, ratio_step),
+        ReflectHorizontal::wrap(MainAndStack::side(max_main, ratio, ratio_step)),
+        MainAndStack::bottom(max_main, ratio, ratio_step),
+        Monocle::boxed()
+    )
+    .map(|layout| ReserveTop::wrap(Gaps::wrap(layout, outer_px, inner_px), BAR_HEIGHT_PX))
 }
 
 fn main() -> Result<()> {
-    // penrose will log useful information about the current state of the WindowManager during
-    // normal operation that can be used to drive scripts and related programs. Additional debug
-    // output can be helpful if you are hitting issues.
-    SimpleLogger::init(LevelFilter::Debug, simplelog::Config::default())
-        .expect("failed to init logging");
+    color_eyre::install()?;
 
-    // Created at startup. See keybindings below for how to access them
-    let mut config_builder = Config::default().builder();
-    config_builder
-        .workspaces(vec!["1", "2", "3", "4", "5", "6", "7", "8", "9"])
-        // Windows with a matching WM_CLASS will always float
-        .floating_classes(vec!["dmenu", "dunst", "polybar"])
-        // Client border colors are set based on X focus
-        .focused_border(0xcc241d) // #cc241d
-        .unfocused_border(0x3c3836); // #3c3836
+    tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .finish()
+        .init();
 
-    // When specifying a layout, most of the time you will want LayoutConf::default() as shown
-    // below, which will honour gap settings and will not be run on focus changes (only when
-    // clients are added/removed). To customise when/how each layout is applied you can create a
-    // LayoutConf instance with your desired properties enabled.
-    let follow_focus_conf = LayoutConf {
-        floating: false,
-        gapless: true,
-        follow_focus: true,
-        allow_wrapping: false,
-    };
+    let config = add_ewmh_hooks(Config {
+        startup_hook: Some(SpawnOnStartup::boxed(STARTUP_SCRIPT)),
+        default_layouts: layouts(),
+        manage_hook: Some(manage_hook()),
+        // refresh_hook: Some(refresh_hooks()),
+        ..Config::default()
+    });
 
-    // Defauly number of clients in the main layout area
-    let n_main = 1;
+    let conn = RustConn::new().context("X conn")?;
+    let key_bindings =
+        parse_keybindings_with_xmodmap(raw_key_bindings()).context("Parse keybindings")?;
 
-    // Default percentage of the screen to fill with the main area of the layout
-    let ratio = 0.6;
+    // let bar = status_bar().context("Create status bar")?;
 
-    // Layouts to be used on each workspace. Currently all workspaces have the same set of Layouts
-    // available to them, though they track modifications to n_main and ratio independently.
-    config_builder.layouts(vec![
-        Layout::new("[side]", LayoutConf::default(), side_stack, n_main, ratio),
-        Layout::new("[botm]", LayoutConf::default(), bottom_stack, n_main, ratio),
-        Layout::new("[papr]", follow_focus_conf, paper, n_main, ratio),
-        Layout::floating("[----]"),
-    ]);
+    let wm = WindowManager::new(config, key_bindings, HashMap::new(), conn)
+        .context("New window manager")?;
 
-    // Now build and validate the config
-    let config = config_builder.build().unwrap();
-
-    // NOTE: change these to programs that you have installed!
-    let my_program_launcher = "dmenu_run";
-    let my_file_manager = "thunar";
-    let my_terminal = "alacritty";
-    let my_browser = "firefox";
-
-    /* hooks
-     *
-     * penrose provides several hook points where you can run your own code as part of
-     * WindowManager methods. This allows you to trigger custom code without having to use a key
-     * binding to do so. See the hooks module in the docs for details of what hooks are avaliable
-     * and when/how they will be called. Note that each class of hook will be called in the order
-     * that they are defined. Hooks may maintain their own internal state which they can use to
-     * modify their behaviour if desired.
-     */
-    let mut hooks: XcbHooks = vec![];
-    hooks.push(Box::new(MyClientHook {}));
-
-    // Using a simple contrib hook that takes no config. By convention, contrib hooks have a 'new'
-    // method that returns a boxed instance of the hook with any configuration performed so that it
-    // is ready to push onto the corresponding *_hooks vec.
-    hooks.push(LayoutSymbolAsRootName::new());
-
-    // Here we are using a contrib hook that requires configuration to set up a default workspace
-    // on workspace "9". This will set the layout and spawn the supplied programs if we make
-    // workspace "9" active while it has no clients.
-    hooks.push(DefaultWorkspace::new(
-        "9",
-        "[botm]",
-        vec![my_terminal, my_terminal, my_file_manager],
-    ));
-
-    // Scratchpad is an extension: it makes use of the same Hook points as the examples above but
-    // additionally provides a 'toggle' method that can be bound to a key combination in order to
-    // trigger the bound scratchpad client.
-    let sp = Scratchpad::new(my_terminal, 0.8, 0.8);
-    hooks.push(sp.get_hook());
-
-    /* The gen_keybindings macro parses user friendly key binding definitions into X keycodes and
-     * modifier masks. It uses the 'xmodmap' program to determine your current keymap and create
-     * the bindings dynamically on startup. If this feels a little too magical then you can
-     * alternatively construct a  HashMap<KeyCode, FireAndForget> manually with your chosen
-     * keybindings (see helpers.rs and data_types.rs for details).
-     * FireAndForget functions do not need to make use of the mutable WindowManager reference they
-     * are passed if it is not required: the run_external macro ignores the WindowManager itself
-     * and instead spawns a new child process.
-     */
-    let key_bindings = gen_keybindings! {
-        // Program launch
-        "M-r" => run_external!(my_program_launcher);
-        "M-Return" => run_external!(my_terminal);
-        "M-f" => run_external!(my_file_manager);
-        "M-w" => run_external!(my_browser);
-
-        // client management
-        "M-j" => run_internal!(cycle_client, Forward);
-        "M-k" => run_internal!(cycle_client, Backward);
-        "M-S-j" => run_internal!(drag_client, Forward);
-        "M-S-k" => run_internal!(drag_client, Backward);
-        "M-S-c" => run_internal!(kill_client);
-        "M-S-f" => run_internal!(toggle_client_fullscreen, &Selector::Focused);
-        "M-slash" => sp.toggle();
-
-        // workspace management
-        "M-Tab" => run_internal!(toggle_workspace);
-        "M-bracketright" => run_internal!(cycle_screen, Forward);
-        "M-bracketleft" => run_internal!(cycle_screen, Backward);
-        "M-S-bracketright" => run_internal!(drag_workspace, Forward);
-        "M-S-bracketleft" => run_internal!(drag_workspace, Backward);
-
-        // Layout management
-        "M-space" => run_internal!(cycle_layout, Forward);
-        "M-S-space" => run_internal!(cycle_layout, Backward);
-        "M-A-comma" => run_internal!(update_max_main, More);
-        "M-A-period" => run_internal!(update_max_main, Less);
-        "M-A-Right" => run_internal!(update_main_ratio, More);
-        "M-A-Left" => run_internal!(update_main_ratio, Less);
-
-        "M-A-s" => run_internal!(detect_screens);
-        "M-S-q" => run_internal!(exit);
-
-        // Each keybinding here will be templated in with the workspace index of each workspace,
-        // allowing for common workspace actions to be bound at once.
-        refmap [ config.ws_range() ] in {
-            "M-{}" => focus_workspace [ index_selectors(config.workspaces().len()) ];
-            "M-S-{}" => client_to_workspace [ index_selectors(config.workspaces().len()) ];
-        };
-    };
-
-    // The underlying connection to the X server is handled as a trait: XConn. XcbConnection is the
-    // reference implementation of this trait that uses the XCB library to communicate with the X
-    // server. You are free to provide your own implementation if you wish, see xconnection.rs for
-    // details of the required methods and expected behaviour and xcb/xconn.rs for the
-    // implementation of XcbConnection.
-    let conn = XcbConnection::new()?;
-
-    // Create the WindowManager instance with the config we have built and a connection to the X
-    // server. Before calling grab_keys_and_run, it is possible to run additional start-up actions
-    // such as configuring initial WindowManager state, running custom code / hooks or spawning
-    // external processes such as a start-up script.
-    let mut wm = WindowManager::new(config, conn, hooks, logging_error_handler());
-    wm.init()?;
-
-    // NOTE: If you are using the default XCB backend provided in the penrose xcb module, then the
-    //       construction of the XcbConnection and resulting WindowManager can be done using the
-    //       new_xcb_backed_window_manager helper function like so:
-    //
-    // let mut wm = new_xcb_backed_window_manager(config)?;
-
-    // grab_keys_and_run will start listening to events from the X server and drop into the main
-    // event loop. From this point on, program control passes to the WindowManager so make sure
-    // that any logic you wish to run is done before here!
-    wm.grab_keys_and_run(key_bindings, HashMap::new())?;
-
+    wm.run().context("Window manager run")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bindings_parse_correctly_with_xmodmap() {
+        let res = parse_keybindings_with_xmodmap(raw_key_bindings());
+
+        if let Err(e) = res {
+            panic!("{e}");
+        }
+    }
 }

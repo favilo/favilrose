@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Name=Penrose From Scratch Session
+Comment=Use this session to run favilo-penrose as your desktop environment
+Exec=run-penrose.sh
+Icon=
+Type=Application
+DesktopNames=PenroseFromScratch

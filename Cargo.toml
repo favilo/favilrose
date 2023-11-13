@@ -1,10 +1,21 @@
 [package]
-name = "favilrose"
+name = "favilo-penrose"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-penrose = "0.2.0"
-simplelog = "0.11.1"
+color-eyre = "0.6.2"
+penrose = "0.3.3"
+penrose_ui = "0.3.3"
+simplelog = "0.12.1"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json"] }
+
+[profile.dev.package.backtrace]
+opt-level = 3
+
+[patch.crates-io]
+# penrose = { path = "../penrose/" }
+# penrose_ui = { path = "../penrose/crates/penrose_ui/" }
