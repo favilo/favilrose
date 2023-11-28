@@ -15,6 +15,9 @@ xsetroot -cursor_name left_ptr
 
 ~/.config/polybar/launch.sh
 
+# xset s 300 600
+xss-lock -- i3lock -n
+
 pkill -fi snixembed; snixembed &
 
 pkill -fi nm-applet; nm-applet &
@@ -22,7 +25,6 @@ pkill -fi nm-applet; nm-applet &
 pkill -fi volumeicon; volumeicon &
 pkill -fi dunst; dunst &
 pkill -fi blueman-applet; blueman-applet &
-pkill -fi xfce4-power-man; xfce4-power-manager &  # for some reason, this ends up running as xcfe4-power-man
-pkill -fi xfce4-screensaver; xfce4-screensaver &
+# pkill -fi xfce4-power-man; xfce4-power-manager &  # for some reason, this ends up running as xcfe4-power-man
 pkill -fi gnome-keyring-daemon; gnome-keyring-daemon --start --components=pkcs11,secrets,ssh &
 pkill -fi talon-bin; talon &
