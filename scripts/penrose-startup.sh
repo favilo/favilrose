@@ -20,6 +20,7 @@ xss-lock -- i3lock -n
 
 pkill -fi snixembed; snixembed &
 
+kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty_remote_control &
 pkill -fi nm-applet; nm-applet &
 # pkill -fi udiskie; udiskie -a -n -t &
 pkill -fi volumeicon; volumeicon &
