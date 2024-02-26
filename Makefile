@@ -27,18 +27,18 @@ install-helpers:
 
 .PHONY: install-penrose-release
 install-penrose-release:
-	@echo ":: Installing release build of penrose-from-scratch..."
+	@echo ":: Installing release build of favilo-penrose..."
 	@mkdir -p /usr/local/bin
 	@cp -f target/release/favilo-penrose /usr/local/bin
 	@chmod 755 /usr/local/bin/favilo-penrose
 
 .PHONY: install-penrose-debug
 install-penrose-debug:
-	@echo ":: Installing debug build of penrose-from-scratch..."
-	@strip target/debug/penrose-from-scratch
+	@echo ":: Installing debug build of favilo-penrose..."
+	@strip target/debug/favilo-penrose
 	@mkdir -p /usr/local/bin
-	@cp -f target/debug/penrose-from-scratch /usr/local/bin
-	@chmod 755 /usr/local/bin/penrose-from-scratch
+	@cp -f target/debug/favilo-penrose /usr/local/bin
+	@chmod 755 /usr/local/bin/favilo-penrose
 
 .PHONY: install
 install: install-penrose-release install-helpers
@@ -52,7 +52,7 @@ install-debug: install-penrose-debug install-helpers
 uninstall:
 	@echo ":: Removing binaries..."
 	@ls bin | xargs -I {} rm -f /usr/local/bin/{}
-	@rm -f /usr/local/bin/penrose-from-scratch
+	@rm -f /usr/local/bin/favilo-penrose
 	@echo ":: Removing scripts..."
 	@ls scripts | xargs -I {} rm -f /usr/local/scripts/{}
 	@echo ":: Done"
