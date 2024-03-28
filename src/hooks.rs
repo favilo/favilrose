@@ -14,11 +14,12 @@ use penrose::{
 
 use crate::BAR_HEIGHT_PX;
 
-const ZOOM_TILE_TITLES: [&str; 4] = [
+const ZOOM_TILE_TITLES: [&str; 5] = [
     "Zoom - Free Account",     // main window
     "Zoom - Licensed Account", // main window
     "Zoom",                    // meeting window on creation
     "Zoom Meeting",            // meeting window shortly after creation
+    "Settings",                // settings window
 ];
 
 struct ZoomTiledQuery;
@@ -58,10 +59,10 @@ impl<X: XConn> Query<X> for ZoomFloatQuery {
 }
 
 pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
+    let top_right_corner = Rect::new(0, 0, 500, 100);
     manage_hooks! {
-        // ClassName("discord") => SetWorkspace("3"),
         ZoomTiledQuery => DefaultTiled,
-        ZoomFloatQuery => FloatingFixed(Rect::new(0, 0, 200, 100)),
+        ZoomFloatQuery => FloatingFixed(top_right_corner),
         IsDock => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)).then(IgnoreWindow),
         ClassName("stalonetray") => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)),
     }
