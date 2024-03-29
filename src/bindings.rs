@@ -100,13 +100,13 @@ where
         Box::new(
             move |_e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
                 let cs = &mut s.client_set;
-                let client = cs.current_stack();
-                let Some(client) = client else {
+                let stack = cs.current_stack();
+                let Some(stack) = stack else {
                     return Ok(());
                 };
-                let client = client.focused().clone();
-                let rect = x.client_geometry(client)?;
-                cs.float(client, rect)?;
+                let xid = stack.focused().clone();
+                let client_rect = x.client_geometry(xid)?;
+                cs.float(xid, client_rect)?;
                 x.refresh(s)
             },
         ),
