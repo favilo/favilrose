@@ -13,12 +13,16 @@ xinput set-prop "11" "libinput Natural Scrolling Enabled" 1
 xinput map-to-output "ELAN900C:00" eDP-1
 
 
-xsetroot -cursor_name left_ptr
+xsetroot -cursor_name left_ptr -solid black
 
 ~/.config/polybar/launch.sh
 
 # xset s 300 600
-xss-lock -- i3lock -n
+# xss-lock -- i3lock -n
+
+pkill -fi xautolock; xautolock -secure -time 10 -locker "i3lock -n" -notify 15 \
+    -notifier "notify-send -t 5000 -i dialog-password -u low 'Security Advisory' '\nLocking Session in 15 seconds'" \
+    -detectsleep &
 
 pkill -fi snixembed; snixembed &
 
