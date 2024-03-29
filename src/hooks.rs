@@ -3,7 +3,9 @@ use penrose::{
         hooks::{ManageHook, StateHook},
         State,
     },
-    extensions::hooks::manage::{DefaultTiled, FloatingFixed, FloatingRelative, SetWorkspace},
+    extensions::hooks::manage::{
+        DefaultTiled, FloatingCentered, FloatingFixed, FloatingRelative, SetWorkspace,
+    },
     manage_hooks,
     pure::geometry::{Rect, RelativeRect},
     x::{
@@ -87,6 +89,10 @@ pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
             ClassName("zoom"),
             NotQuery(Titles(ZOOM_TILE_TITLES.to_vec()))
         ) => FloatingRelative(top_right_corner),
+        AndQuery(
+            ClassName("obsidian"),
+            Titles(vec!["Obsidian Help"]),
+        ) => FloatingCentered::new(0.25, 0.5),
         IsDock => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)).then(IgnoreWindow),
         ClassName("stalonetray") => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)),
     };
