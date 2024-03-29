@@ -4,7 +4,7 @@ use penrose::{util::spawn_for_output_with_args, x::XConn, Color};
 use penrose_ui::{
     bar::widgets::{
         amixer_volume, battery_summary, current_date_and_time, wifi_network, ActiveWindowName,
-        CurrentLayout, IntervalText, Text, Widget, Workspaces,
+        CurrentLayout, IntervalText, Widget, Workspaces,
     },
     Position, StatusBar, TextStyle,
 };

@@ -3,9 +3,7 @@ use penrose::{
         hooks::{ManageHook, StateHook},
         State,
     },
-    extensions::hooks::manage::{
-        DefaultTiled, FloatingCentered, FloatingFixed, FloatingRelative, SetWorkspace,
-    },
+    extensions::hooks::manage::{DefaultTiled, FloatingCentered, FloatingFixed, FloatingRelative},
     manage_hooks,
     pure::geometry::{Rect, RelativeRect},
     x::{
@@ -115,7 +113,7 @@ impl<X: XConn> Query<X> for IsDock {
 pub struct IgnoreWindow;
 
 impl<X: XConn> ManageHook<X> for IgnoreWindow {
-    fn call(&mut self, client: penrose::Xid, state: &mut State<X>, x: &X) -> penrose::Result<()> {
+    fn call(&mut self, client: penrose::Xid, state: &mut State<X>, _: &X) -> penrose::Result<()> {
         state.client_set.remove_client(&client);
         Ok(())
     }
@@ -128,7 +126,7 @@ pub fn refresh_hooks<'a, X: XConn + 'a>() -> Box<dyn StateHook<X> + 'a> {
 struct DockMoveHook;
 
 impl<X: XConn> StateHook<X> for DockMoveHook {
-    fn call(&mut self, state: &mut State<X>, x: &X) -> penrose::Result<()> {
+    fn call(&mut self, _state: &mut State<X>, _: &X) -> penrose::Result<()> {
         todo!()
     }
 }

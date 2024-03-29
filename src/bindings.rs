@@ -2,11 +2,7 @@ use std::collections::HashMap;
 
 use penrose::{
     builtin::{
-        actions::{
-            exit,
-            floating::{float_focused, sink_focused},
-            modify_with, send_layout_message, spawn,
-        },
+        actions::{exit, floating::sink_focused, modify_with, send_layout_message, spawn},
         layout::messages::{ExpandMain, IncMain, ShrinkMain},
     },
     core::{
@@ -17,11 +13,8 @@ use penrose::{
         ClientSet, State,
     },
     map,
-    pure::Stack,
-    util::spawn_with_args,
     x::{XConn, XConnExt},
     x11rb::RustConn,
-    Xid,
 };
 
 pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
@@ -104,7 +97,7 @@ where
                 let Some(stack) = stack else {
                     return Ok(());
                 };
-                let xid = stack.focused().clone();
+                let xid = *stack.focused();
                 let client_rect = x.client_geometry(xid)?;
                 cs.float(xid, client_rect)?;
                 x.refresh(s)
@@ -114,6 +107,7 @@ where
     map
 }
 
+#[allow(unused)]
 fn mouse_modify_with<F, X>(f: F) -> Box<dyn MouseEventHandler<X>>
 where
     F: Fn(&mut ClientSet) + Clone + 'static,

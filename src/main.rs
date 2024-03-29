@@ -4,10 +4,7 @@
 //! has multiple workspaces and simple client / workspace movement.
 use color_eyre::eyre::{Context, Result};
 use penrose::{
-    core::{
-        bindings::{parse_keybindings_with_xmodmap, MouseBindings},
-        Config, WindowManager,
-    },
+    core::{bindings::parse_keybindings_with_xmodmap, Config, WindowManager},
     extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
     x11rb::RustConn,
 };
