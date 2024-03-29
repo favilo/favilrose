@@ -3,9 +3,9 @@ use penrose::{
         hooks::{ManageHook, StateHook},
         State,
     },
-    extensions::hooks::manage::{DefaultTiled, FloatingFixed, SetWorkspace},
+    extensions::hooks::manage::{DefaultTiled, FloatingFixed, FloatingRelative, SetWorkspace},
     manage_hooks,
-    pure::geometry::Rect,
+    pure::geometry::{Rect, RelativeRect},
     x::{
         query::{ClassName, StringProperty, Title},
         Atom, Query, XConn,
@@ -13,6 +13,60 @@ use penrose::{
 };
 
 use crate::BAR_HEIGHT_PX;
+
+struct AndQuery<Q1, Q2>(Q1, Q2);
+
+impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for AndQuery<Q1, Q2> {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        Ok(self.0.run(id, x)? && self.1.run(id, x)?)
+    }
+}
+
+struct OrQuery<Q1, Q2>(Q1, Q2);
+
+impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for OrQuery<Q1, Q2> {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        Ok(self.0.run(id, x)? || self.1.run(id, x)?)
+    }
+}
+
+struct NotQuery<Q>(Q);
+
+impl<X: XConn, Q: Query<X>> Query<X> for NotQuery<Q> {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        Ok(!self.0.run(id, x)?)
+    }
+}
+
+struct AnyQuery<X>(Vec<Box<dyn Query<X>>>);
+
+impl<X: XConn> Query<X> for AnyQuery<X> {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        self.0
+            .iter()
+            .try_fold(false, |acc, query| Ok(acc || query.run(id, x)?))
+    }
+}
+
+struct AllQuery<X>(Vec<Box<dyn Query<X>>>);
+
+impl<X: XConn> Query<X> for AllQuery<X> {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        self.0
+            .iter()
+            .try_fold(true, |acc, query| Ok(acc && query.run(id, x)?))
+    }
+}
+
+struct Titles(Vec<&'static str>);
+
+impl<X: XConn> Query<X> for Titles {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        self.0
+            .iter()
+            .try_fold(false, |acc, title| Ok(acc || Title(title).run(id, x)?))
+    }
+}
 
 const ZOOM_TILE_TITLES: [&str; 5] = [
     "Zoom - Free Account",     // main window
@@ -22,50 +76,21 @@ const ZOOM_TILE_TITLES: [&str; 5] = [
     "Settings",                // settings window
 ];
 
-struct ZoomTiledQuery;
-
-impl<X: XConn> Query<X> for ZoomTiledQuery {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        let zoom_class = ClassName("zoom").run(id, x)?;
-        if !zoom_class {
-            return Ok(false);
-        }
-
-        for title in ZOOM_TILE_TITLES.iter() {
-            if Title(title).run(id, x)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-}
-
-struct ZoomFloatQuery;
-
-impl<X: XConn> Query<X> for ZoomFloatQuery {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        let zoom_class = ClassName("zoom").run(id, x)?;
-        if !zoom_class {
-            return Ok(false);
-        }
-
-        for title in ZOOM_TILE_TITLES.iter() {
-            if Title(title).run(id, x)? {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-}
-
 pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
-    let top_right_corner = Rect::new(0, 0, 500, 100);
-    manage_hooks! {
-        ZoomTiledQuery => DefaultTiled,
-        ZoomFloatQuery => FloatingFixed(top_right_corner),
+    let top_right_corner = RelativeRect::new(0.05, 0.0, 0.15, 0.10);
+    let manage_hook = manage_hooks! {
+        AndQuery(
+            ClassName("zoom"),
+            Titles(ZOOM_TILE_TITLES.to_vec())
+        ) => DefaultTiled,
+        AndQuery(
+            ClassName("zoom"),
+            NotQuery(Titles(ZOOM_TILE_TITLES.to_vec()))
+        ) => FloatingRelative(top_right_corner),
         IsDock => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)).then(IgnoreWindow),
         ClassName("stalonetray") => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)),
-    }
+    };
+    manage_hook
 }
 
 pub struct IsDock;

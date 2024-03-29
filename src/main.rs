@@ -4,16 +4,21 @@
 //! has multiple workspaces and simple client / workspace movement.
 use color_eyre::eyre::{Context, Result};
 use penrose::{
-    core::{bindings::parse_keybindings_with_xmodmap, Config, WindowManager},
+    core::{
+        bindings::{parse_keybindings_with_xmodmap, MouseBindings},
+        Config, WindowManager,
+    },
     extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
     x11rb::RustConn,
 };
 
 use favilo_penrose::{
-    bindings::raw_key_bindings, hooks::manage_hook, layouts::layouts, STARTUP_SCRIPT,
+    bindings::{mouse_bindings, raw_key_bindings},
+    hooks::manage_hook,
+    layouts::layouts,
+    STARTUP_SCRIPT,
 };
 
-use std::collections::HashMap;
 use tracing_subscriber::{self, prelude::*};
 
 fn main() -> Result<()> {
@@ -38,7 +43,8 @@ fn main() -> Result<()> {
 
     // let bar = status_bar().context("Create status bar")?;
 
-    let wm = WindowManager::new(config, key_bindings, HashMap::new(), conn)
+    let mouse_bindings = mouse_bindings();
+    let wm = WindowManager::new(config, key_bindings, mouse_bindings, conn)
         .context("New window manager")?;
 
     wm.run().context("Window manager run")?;
