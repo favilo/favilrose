@@ -68,12 +68,13 @@ impl<X: XConn> Query<X> for Titles {
     }
 }
 
-const ZOOM_TILE_TITLES: [&str; 5] = [
+const ZOOM_TILE_TITLES: [&str; 6] = [
     "Zoom - Free Account",     // main window
     "Zoom - Licensed Account", // main window
     "Zoom",                    // meeting window on creation
     "Zoom Meeting",            // meeting window shortly after creation
     "Settings",                // settings window
+    "Metting Chat",            // chat window
 ];
 
 pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
