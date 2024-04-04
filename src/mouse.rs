@@ -45,7 +45,6 @@ impl MouseHandler {
     pub fn start_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
-                tracing::info!("Starting drag");
                 let cs = &mut s.client_set;
                 let stack = cs.current_stack();
                 let Some(stack) = stack else {
@@ -53,6 +52,7 @@ impl MouseHandler {
                 };
                 let xid = *stack.focused();
                 let client_rect = x.client_geometry(xid)?;
+                // Keep the internal representation of the client in sync with the X server
                 cs.float(xid, client_rect)?;
 
                 let handler = s.extension::<Self>()?;
@@ -76,16 +76,11 @@ impl MouseHandler {
     pub fn stop_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, _x: &X| -> penrose::Result<()> {
-                tracing::info!("Stopping drag");
                 let handler = s.extension::<Self>()?;
                 let mut handler = handler.borrow_mut();
                 if handler.data.is_none() {
                     return Err(Error::Custom("no drag in progress".to_string()));
                 };
-                tracing::info!(
-                    "Done dragging window {} ",
-                    handler.data.as_ref().unwrap().xid
-                );
                 assert!(handler.data.as_ref().unwrap().button == e.state.button);
                 handler.data = None;
                 Ok(())
@@ -96,62 +91,40 @@ impl MouseHandler {
     pub fn drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
-                tracing::info!("Dragging window");
                 let handler = &s.extension::<Self>()?;
                 let handler = handler.borrow();
                 let Some(ref data) = handler.data else {
                     return Err(Error::Custom("no drag in progress".to_string()));
                 };
 
+                let (dx, dy) = (
+                    e.rpt.x as i32 - data.start_point.x as i32,
+                    e.rpt.y as i32 - data.start_point.y as i32,
+                );
+                let mut new_rect = data.start_rect.clone();
                 match data.button {
-                    MouseButton::Left => Self::drag_window(e, data, s, x)?,
-                    MouseButton::Right => Self::resize_window(e, data, s, x)?,
-                    MouseButton::Middle | MouseButton::ScrollUp | MouseButton::ScrollDown => {}
+                    MouseButton::Left => {
+                        new_rect.reposition(dx, dy);
+                    }
+                    MouseButton::Right => {
+                        new_rect.resize(dx, dy);
+                    }
+                    MouseButton::Middle | MouseButton::ScrollUp | MouseButton::ScrollDown => {
+                        // Don't handle these yet
+                        return Ok(());
+                    }
                 };
+
+                // Keep the internal representation of the client in sync with the X server
+                let cs = &mut s.client_set;
+                cs.float(data.xid, new_rect)?;
+
+                x.position_client(data.xid, new_rect)?;
+                // Don't call `x.refresh()` because it re-focuses the mouse
 
                 Ok(())
             },
         )
-    }
-
-    fn drag_window<X: XConn>(
-        e: &MouseEvent,
-        data: &ClickData,
-        s: &mut State<X>,
-        x: &X,
-    ) -> penrose::Result<()> {
-        let (dx, dy) = (
-            e.rpt.x as i32 - data.start_point.x as i32,
-            e.rpt.y as i32 - data.start_point.y as i32,
-        );
-        tracing::info!("Dragging window {} by {},{}", data.xid, dx, dy);
-        let mut new_rect = data.start_rect.clone();
-        new_rect.reposition(dx, dy);
-        let cs = &mut s.client_set;
-        cs.float(data.xid, new_rect)?;
-
-        x.position_client(data.xid, new_rect)?;
-        Ok(())
-    }
-
-    fn resize_window<X: XConn>(
-        e: &MouseEvent,
-        data: &ClickData,
-        s: &mut State<X>,
-        x: &X,
-    ) -> penrose::Result<()> {
-        let (dx, dy) = (
-            e.rpt.x as i32 - data.start_point.x as i32,
-            e.rpt.y as i32 - data.start_point.y as i32,
-        );
-        tracing::info!("Dragging window {} by {},{}", data.xid, dx, dy);
-        let mut new_rect = data.start_rect.clone();
-        new_rect.resize(dx, dy);
-        let cs = &mut s.client_set;
-        cs.float(data.xid, new_rect)?;
-
-        x.position_client(data.xid, new_rect)?;
-        Ok(())
     }
 }
 
