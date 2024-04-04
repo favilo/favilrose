@@ -12,7 +12,6 @@ xinput set-prop "11" "libinput Tapping Enabled" 1
 xinput set-prop "11" "libinput Natural Scrolling Enabled" 1
 xinput map-to-output "ELAN900C:00" eDP-1
 
-
 xsetroot -cursor_name left_ptr -solid black
 
 ~/.config/polybar/launch.sh

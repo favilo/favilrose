@@ -5,15 +5,8 @@ use penrose::{
         actions::{exit, floating::sink_focused, modify_with, send_layout_message, spawn},
         layout::messages::{ExpandMain, IncMain, ShrinkMain},
     },
-    core::{
-        bindings::{
-            KeyEventHandler, ModifierKey, MouseBindings, MouseButton, MouseEvent,
-            MouseEventHandler, MouseEventKind, MouseState,
-        },
-        ClientSet, State,
-    },
+    core::bindings::KeyEventHandler,
     map,
-    x::{XConn, XConnExt},
     x11rb::RustConn,
 };
 
@@ -75,43 +68,4 @@ pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>>
     }
 
     raw_bindings
-}
-
-pub fn mouse_bindings<X>() -> MouseBindings<X>
-where
-    X: XConn,
-{
-    let mut map: MouseBindings<X> = HashMap::new();
-    map.insert(
-        (
-            MouseEventKind::Press,
-            MouseState {
-                button: MouseButton::Left,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        Box::new(
-            move |_e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
-                let cs = &mut s.client_set;
-                let stack = cs.current_stack();
-                let Some(stack) = stack else {
-                    return Ok(());
-                };
-                let xid = *stack.focused();
-                let client_rect = x.client_geometry(xid)?;
-                cs.float(xid, client_rect)?;
-                x.refresh(s)
-            },
-        ),
-    );
-    map
-}
-
-#[allow(unused)]
-fn mouse_modify_with<F, X>(f: F) -> Box<dyn MouseEventHandler<X>>
-where
-    F: Fn(&mut ClientSet) + Clone + 'static,
-    X: XConn,
-{
-    Box::new(move |_: &MouseEvent, s: &mut State<X>, x: &X| x.modify_and_refresh(s, f.clone()))
 }

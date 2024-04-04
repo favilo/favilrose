@@ -2,6 +2,7 @@ pub mod bar;
 pub mod bindings;
 pub mod hooks;
 pub mod layouts;
+pub mod mouse;
 
 pub const STARTUP_SCRIPT: &str = "/usr/local/scripts/penrose-startup.sh";
 
