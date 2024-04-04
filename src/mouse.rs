@@ -1,11 +1,6 @@
-use std::collections::HashMap;
-
 use penrose::{
     core::{
-        bindings::{
-            ModifierKey, MouseBindings, MouseButton, MouseEvent, MouseEventHandler, MouseEventKind,
-            MouseState,
-        },
+        bindings::{MouseBindings, MouseButton, MouseEvent, MouseEventHandler},
         ClientSet, State,
     },
     pure::geometry::{Point, Rect},
@@ -132,58 +127,13 @@ pub fn mouse_bindings<X>() -> MouseBindings<X>
 where
     X: XConn,
 {
-    let mut map: MouseBindings<X> = HashMap::new();
-    map.insert(
-        (
-            MouseEventKind::Motion,
-            MouseState {
-                button: MouseButton::ScrollDown,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::drag(),
-    );
-    map.insert(
-        (
-            MouseEventKind::Press,
-            MouseState {
-                button: MouseButton::Left,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::start_drag(),
-    );
-    map.insert(
-        (
-            MouseEventKind::Release,
-            MouseState {
-                button: MouseButton::Left,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::stop_drag(),
-    );
-    map.insert(
-        (
-            MouseEventKind::Press,
-            MouseState {
-                button: MouseButton::Right,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::start_drag(),
-    );
-    map.insert(
-        (
-            MouseEventKind::Release,
-            MouseState {
-                button: MouseButton::Right,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::stop_drag(),
-    );
-    map
+    gen_mousebindings!(
+        Motion ScrollDown + [Meta] => MouseHandler::drag(),
+        Press Left + [Meta] => MouseHandler::start_drag(),
+        Release Left + [Meta] => MouseHandler::stop_drag(),
+        Press Right + [Meta] => MouseHandler::start_drag(),
+        Release Right + [Meta] => MouseHandler::stop_drag()
+    )
 }
 
 #[allow(unused)]
@@ -194,3 +144,35 @@ where
 {
     Box::new(move |_: &MouseEvent, s: &mut State<X>, x: &X| x.modify_and_refresh(s, f.clone()))
 }
+
+/// Make creating all of the mouse bindings less verbose
+#[macro_export]
+macro_rules! gen_mousebindings {
+    {
+        $($kind:ident $button:ident + [$($modifier:ident),+] => $action:expr),+
+    } => {
+        {
+            let mut _map = penrose::core::bindings::MouseBindings::new();
+
+            $(
+                let mut modifiers = Vec::new();
+                $(modifiers.push(penrose::core::bindings::ModifierKey::$modifier);)+
+
+                let state = penrose::core::bindings::MouseState::new(
+                    penrose::core::bindings::MouseButton::$button,
+                    modifiers
+                );
+
+                let kind = penrose::core::bindings::MouseEventKind::$kind;
+                _map.insert(
+                    (kind, state),
+                    $action
+                );
+            )+
+
+            _map
+        }
+    };
+}
+
+pub use gen_mousebindings;
