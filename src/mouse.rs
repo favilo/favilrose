@@ -9,7 +9,6 @@ use penrose::{
         ClientSet, State,
     },
     pure::geometry::{Point, Rect},
-    util::spawn_with_args,
     x::{XConn, XConnExt},
     Error, Xid,
 };
@@ -19,11 +18,23 @@ pub struct MouseHandler {
     data: Option<ClickData>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ClickData {
     start_point: Point,
     start_rect: Rect,
     xid: Xid,
+    button: MouseButton,
+}
+
+impl Default for ClickData {
+    fn default() -> Self {
+        Self {
+            start_point: Point::default(),
+            start_rect: Rect::default(),
+            xid: Xid::default(),
+            button: MouseButton::Left,
+        }
+    }
 }
 
 impl MouseHandler {
@@ -51,6 +62,7 @@ impl MouseHandler {
                         start_point: e.rpt,
                         start_rect: client_rect,
                         xid,
+                        button: e.state.button,
                     });
                 } else {
                     return Err(Error::Custom("already dragging".to_string()));
@@ -73,13 +85,14 @@ impl MouseHandler {
                     "Done dragging window {} ",
                     handler.data.as_ref().unwrap().xid
                 );
+                assert!(handler.data.as_ref().unwrap().button == MouseButton::Left);
                 handler.data = None;
                 Ok(())
             },
         )
     }
 
-    pub fn left_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    pub fn drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
                 tracing::info!("Dragging window");
@@ -89,22 +102,35 @@ impl MouseHandler {
                     return Err(Error::Custom("no drag in progress".to_string()));
                 };
 
-                let (dx, dy) = (
-                    e.rpt.x as i32 - data.start_point.x as i32,
-                    e.rpt.y as i32 - data.start_point.y as i32,
-                );
+                match data.button {
+                    MouseButton::Left => Self::drag_window(e, data, s, x)?,
+                    MouseButton::Right => {}
+                    MouseButton::Middle | MouseButton::ScrollUp | MouseButton::ScrollDown => {}
+                };
 
-                tracing::info!("Dragging window {} by {},{}", data.xid, dx, dy);
-
-                let mut new_rect = data.start_rect.clone();
-                new_rect.reposition(dx, dy);
-
-                let cs = &mut s.client_set;
-                cs.float(data.xid, new_rect)?;
-
-                x.refresh(s)
+                Ok(())
             },
         )
+    }
+
+    fn drag_window<X: XConn>(
+        e: &MouseEvent,
+        data: &ClickData,
+        s: &mut State<X>,
+        x: &X,
+    ) -> Result<(), Error> {
+        let (dx, dy) = (
+            e.rpt.x as i32 - data.start_point.x as i32,
+            e.rpt.y as i32 - data.start_point.y as i32,
+        );
+        tracing::info!("Dragging window {} by {},{}", data.xid, dx, dy);
+        let mut new_rect = data.start_rect.clone();
+        new_rect.reposition(dx, dy);
+        let cs = &mut s.client_set;
+        cs.float(data.xid, new_rect)?;
+
+        x.position_client(data.xid, new_rect)?;
+        Ok(())
     }
 }
 
@@ -129,11 +155,11 @@ where
         (
             MouseEventKind::Motion,
             MouseState {
-                button: MouseButton::Left,
+                button: MouseButton::ScrollDown,
                 modifiers: vec![ModifierKey::Meta],
             },
         ),
-        MouseHandler::left_drag(),
+        MouseHandler::drag(),
     );
     map.insert(
         (
