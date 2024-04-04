@@ -42,7 +42,7 @@ impl MouseHandler {
         Self { data: None }
     }
 
-    pub fn start_left_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    pub fn start_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
                 tracing::info!("Starting drag");
@@ -67,14 +67,15 @@ impl MouseHandler {
                 } else {
                     return Err(Error::Custom("already dragging".to_string()));
                 }
-                x.refresh(s)
+                // Don't call `x.refresh()` because it re-focuses the mouse
+                Ok(())
             },
         )
     }
 
-    pub fn stop_left_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    pub fn stop_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
-            move |_e: &MouseEvent, s: &mut State<X>, _x: &X| -> penrose::Result<()> {
+            move |e: &MouseEvent, s: &mut State<X>, _x: &X| -> penrose::Result<()> {
                 tracing::info!("Stopping drag");
                 let handler = s.extension::<Self>()?;
                 let mut handler = handler.borrow_mut();
@@ -85,7 +86,7 @@ impl MouseHandler {
                     "Done dragging window {} ",
                     handler.data.as_ref().unwrap().xid
                 );
-                assert!(handler.data.as_ref().unwrap().button == MouseButton::Left);
+                assert!(handler.data.as_ref().unwrap().button == e.state.button);
                 handler.data = None;
                 Ok(())
             },
@@ -104,7 +105,7 @@ impl MouseHandler {
 
                 match data.button {
                     MouseButton::Left => Self::drag_window(e, data, s, x)?,
-                    MouseButton::Right => {}
+                    MouseButton::Right => Self::resize_window(e, data, s, x)?,
                     MouseButton::Middle | MouseButton::ScrollUp | MouseButton::ScrollDown => {}
                 };
 
@@ -118,7 +119,7 @@ impl MouseHandler {
         data: &ClickData,
         s: &mut State<X>,
         x: &X,
-    ) -> Result<(), Error> {
+    ) -> penrose::Result<()> {
         let (dx, dy) = (
             e.rpt.x as i32 - data.start_point.x as i32,
             e.rpt.y as i32 - data.start_point.y as i32,
@@ -132,6 +133,26 @@ impl MouseHandler {
         x.position_client(data.xid, new_rect)?;
         Ok(())
     }
+
+    fn resize_window<X: XConn>(
+        e: &MouseEvent,
+        data: &ClickData,
+        s: &mut State<X>,
+        x: &X,
+    ) -> penrose::Result<()> {
+        let (dx, dy) = (
+            e.rpt.x as i32 - data.start_point.x as i32,
+            e.rpt.y as i32 - data.start_point.y as i32,
+        );
+        tracing::info!("Dragging window {} by {},{}", data.xid, dx, dy);
+        let mut new_rect = data.start_rect.clone();
+        new_rect.resize(dx, dy);
+        let cs = &mut s.client_set;
+        cs.float(data.xid, new_rect)?;
+
+        x.position_client(data.xid, new_rect)?;
+        Ok(())
+    }
 }
 
 pub fn mouse_bindings<X>() -> MouseBindings<X>
@@ -139,18 +160,6 @@ where
     X: XConn,
 {
     let mut map: MouseBindings<X> = HashMap::new();
-    // Float window with meta + left click
-    map.insert(
-        (
-            MouseEventKind::Press,
-            MouseState {
-                button: MouseButton::Left,
-                modifiers: vec![ModifierKey::Meta],
-            },
-        ),
-        MouseHandler::start_left_drag(),
-    );
-    // Drag window with meta held + left button
     map.insert(
         (
             MouseEventKind::Motion,
@@ -163,13 +172,43 @@ where
     );
     map.insert(
         (
+            MouseEventKind::Press,
+            MouseState {
+                button: MouseButton::Left,
+                modifiers: vec![ModifierKey::Meta],
+            },
+        ),
+        MouseHandler::start_drag(),
+    );
+    map.insert(
+        (
             MouseEventKind::Release,
             MouseState {
                 button: MouseButton::Left,
                 modifiers: vec![ModifierKey::Meta],
             },
         ),
-        MouseHandler::stop_left_drag(),
+        MouseHandler::stop_drag(),
+    );
+    map.insert(
+        (
+            MouseEventKind::Press,
+            MouseState {
+                button: MouseButton::Right,
+                modifiers: vec![ModifierKey::Meta],
+            },
+        ),
+        MouseHandler::start_drag(),
+    );
+    map.insert(
+        (
+            MouseEventKind::Release,
+            MouseState {
+                button: MouseButton::Right,
+                modifiers: vec![ModifierKey::Meta],
+            },
+        ),
+        MouseHandler::stop_drag(),
     );
     map
 }
