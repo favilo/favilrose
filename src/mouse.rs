@@ -3,9 +3,10 @@ use penrose::{
         bindings::{MouseBindings, MouseButton, MouseEvent, MouseEventHandler},
         ClientSet, State,
     },
+    custom_error,
     pure::geometry::{Point, Rect},
     x::{XConn, XConnExt},
-    Error, Xid,
+    Xid,
 };
 
 #[derive(Debug, Default)]
@@ -60,7 +61,7 @@ impl MouseHandler {
                         button: e.state.button,
                     });
                 } else {
-                    return Err(Error::Custom("already dragging".to_string()));
+                    return Err(custom_error!("already dragging"));
                 }
                 // Don't call `x.refresh()` because it re-focuses the mouse
                 Ok(())
@@ -74,7 +75,7 @@ impl MouseHandler {
                 let handler = s.extension::<Self>()?;
                 let mut handler = handler.borrow_mut();
                 if handler.data.is_none() {
-                    return Err(Error::Custom("no drag in progress".to_string()));
+                    return Err(custom_error!("no drag in progress"));
                 };
                 assert!(handler.data.as_ref().unwrap().button == e.state.button);
                 handler.data = None;
@@ -89,7 +90,7 @@ impl MouseHandler {
                 let handler = &s.extension::<Self>()?;
                 let handler = handler.borrow();
                 let Some(ref data) = handler.data else {
-                    return Err(Error::Custom("no drag in progress".to_string()));
+                    return Err(custom_error!("no drag in progress"));
                 };
 
                 let (dx, dy) = (
