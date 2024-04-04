@@ -128,6 +128,7 @@ where
     X: XConn,
 {
     gen_mousebindings!(
+        // This is forced to be ScrollDown due to https://github.com/sminez/penrose/issues/113
         Motion ScrollDown + [Meta] => MouseHandler::drag(),
         Press Left + [Meta] => MouseHandler::start_drag(),
         Release Left + [Meta] => MouseHandler::stop_drag(),
