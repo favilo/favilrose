@@ -1,20 +1,21 @@
 use penrose::{
     core::{
         bindings::{MouseBindings, MouseButton, MouseEvent, MouseEventHandler},
-        ClientSet, State,
+        ClientSet, State, WindowManager,
     },
     custom_error,
     pure::geometry::{Point, Rect},
-    x::{XConn, XConnExt},
+    x::{XConn, XConnExt, XEvent},
     Xid,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MouseHandler {
+    current_point: Point,
     data: Option<ClickData>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClickData {
     start_point: Point,
     start_rect: Rect,
@@ -35,10 +36,48 @@ impl Default for ClickData {
 
 impl MouseHandler {
     pub fn new() -> Self {
-        Self { data: None }
+        Self {
+            data: None,
+            ..Default::default()
+        }
     }
 
-    pub fn start_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    pub fn install_mouse_handler<X: XConn + 'static>(mut wm: WindowManager<X>) -> WindowManager<X> {
+        wm.state.add_extension(Self::new());
+        wm.state.config.compose_or_set_event_hook(Self::event_hook);
+        wm
+    }
+
+    pub fn event_hook<X: XConn>(e: &XEvent, s: &mut State<X>, _x: &X) -> penrose::Result<bool> {
+        match e {
+            XEvent::MouseEvent(e) => {
+                let handler = s.extension::<Self>()?;
+                handler.borrow_mut().current_point = e.rpt;
+            }
+            _ => {}
+        }
+        Ok(true)
+    }
+
+    pub fn mouse_bindings<X>() -> MouseBindings<X>
+    where
+        X: XConn,
+    {
+        gen_mousebindings!(
+            // This is forced to be ScrollDown due to https://github.com/sminez/penrose/issues/113
+            Motion ScrollDown + [Meta] => MouseHandler::drag(),
+            Press Left + [Meta] => MouseHandler::start_drag(),
+            Release Left + [Meta] => MouseHandler::stop_drag(),
+            Press Right + [Meta] => MouseHandler::start_drag(),
+            Release Right + [Meta] => MouseHandler::stop_drag()
+        )
+    }
+
+    pub fn current_mouse_position(&self) -> Point {
+        self.current_point
+    }
+
+    fn start_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
                 let cs = &mut s.client_set;
@@ -69,7 +108,7 @@ impl MouseHandler {
         )
     }
 
-    pub fn stop_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    fn stop_drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, _x: &X| -> penrose::Result<()> {
                 let handler = s.extension::<Self>()?;
@@ -84,7 +123,7 @@ impl MouseHandler {
         )
     }
 
-    pub fn drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
+    fn drag<X: XConn>() -> Box<dyn MouseEventHandler<X>> {
         Box::new(
             move |e: &MouseEvent, s: &mut State<X>, x: &X| -> penrose::Result<()> {
                 let handler = &s.extension::<Self>()?;
@@ -122,20 +161,6 @@ impl MouseHandler {
             },
         )
     }
-}
-
-pub fn mouse_bindings<X>() -> MouseBindings<X>
-where
-    X: XConn,
-{
-    gen_mousebindings!(
-        // This is forced to be ScrollDown due to https://github.com/sminez/penrose/issues/113
-        Motion ScrollDown + [Meta] => MouseHandler::drag(),
-        Press Left + [Meta] => MouseHandler::start_drag(),
-        Release Left + [Meta] => MouseHandler::stop_drag(),
-        Press Right + [Meta] => MouseHandler::start_drag(),
-        Release Right + [Meta] => MouseHandler::stop_drag()
-    )
 }
 
 #[allow(unused)]

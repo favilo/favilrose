@@ -12,10 +12,7 @@ use penrose::{
 };
 
 use favilo_penrose::{
-    bindings::raw_key_bindings,
-    hooks::manage_hook,
-    layouts::layouts,
-    mouse::{mouse_bindings, MouseHandler},
+    bindings::raw_key_bindings, hooks::manage_hook, layouts::layouts, mouse::MouseHandler,
     STARTUP_SCRIPT,
 };
 
@@ -38,12 +35,12 @@ fn main() -> Result<()> {
 
     // let bar = status_bar().context("Create status bar")?;
 
-    let mouse_handler = MouseHandler::new();
-    let mouse_bindings = mouse_bindings();
-    let mut wm = WindowManager::new(config, key_bindings, mouse_bindings, conn)
+    let mouse_bindings = MouseHandler::mouse_bindings();
+
+    let wm = WindowManager::new(config, key_bindings, mouse_bindings, conn)
         .context("New window manager")?;
 
-    wm.add_extension(mouse_handler);
+    let wm = MouseHandler::install_mouse_handler(wm);
 
     wm.run().context("Window manager run")?;
     Ok(())
