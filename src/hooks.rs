@@ -58,9 +58,45 @@ impl<X: XConn> Query<X> for AllQuery<X> {
     }
 }
 
+trait QueryExt<X>: Query<X>
+where
+    X: XConn,
+{
+    fn and(self, other: impl Query<X>) -> impl Query<X>
+    where
+        Self: Sized,
+    {
+        AndQuery(self, other)
+    }
+
+    fn or(self, other: impl Query<X>) -> impl Query<X>
+    where
+        Self: Sized,
+    {
+        OrQuery(self, other)
+    }
+
+    fn not(self) -> impl Query<X>
+    where
+        Self: Sized,
+    {
+        NotQuery(self)
+    }
+}
+
+impl<X, Q> QueryExt<X> for Q
+where
+    X: XConn,
+    Q: Query<X>,
+{
+}
+
 struct Titles(Vec<&'static str>);
 
-impl<X: XConn> Query<X> for Titles {
+impl<X> Query<X> for Titles
+where
+    X: XConn,
+{
     fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
         self.0
             .iter()
@@ -68,30 +104,29 @@ impl<X: XConn> Query<X> for Titles {
     }
 }
 
-const ZOOM_TILE_TITLES: [&str; 6] = [
-    "Zoom - Free Account",     // main window
-    "Zoom - Licensed Account", // main window
-    "Zoom",                    // meeting window on creation
-    "Zoom Meeting",            // meeting window shortly after creation
-    "Settings",                // settings window
-    "Metting Chat",            // chat window
+const ZOOM_TILE_TITLES: &'static [&str] = &[
+    "Zoom - Free Account",               // main window
+    "Zoom Workplace - Free Account",     // main window
+    "Zoom - Licensed Account",           // main window
+    "Zoom Workplace - Licensed Account", // main window
+    "Zoom",                              // meeting window on creation
+    "Zoom Meeting",                      // meeting window shortly after creation
+    "Settings",                          // settings window
+    "Metting Chat",                      // chat window
 ];
 
 pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
     let top_right_corner = RelativeRect::new(0.05, 0.0, 0.15, 0.10);
     let manage_hook = manage_hooks! {
-        AndQuery(
-            ClassName("zoom"),
-            Titles(ZOOM_TILE_TITLES.to_vec())
-        ) => DefaultTiled,
-        AndQuery(
-            ClassName("zoom"),
-            NotQuery(Titles(ZOOM_TILE_TITLES.to_vec()))
+        ClassName("zoom").and(
+            Titles(ZOOM_TILE_TITLES.to_vec()))
+        => DefaultTiled,
+        ClassName("zoom").and(
+            Titles(ZOOM_TILE_TITLES.to_vec()).not()
         ) => FloatingRelative(top_right_corner),
-        AndQuery(
-            ClassName("obsidian"),
-            Titles(vec!["Obsidian Help"]),
-        ) => FloatingCentered::new(0.25, 0.5),
+        ClassName("obsidian").and(
+            Titles(vec!["Obsidian Help"]))
+         => FloatingCentered::new(0.25, 0.5),
         IsDock => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)).then(IgnoreWindow),
         ClassName("stalonetray") => FloatingFixed(Rect::new(0, 0, 100, BAR_HEIGHT_PX)),
     };
