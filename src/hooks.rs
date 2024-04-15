@@ -16,7 +16,12 @@ use crate::BAR_HEIGHT_PX;
 
 struct AndQuery<Q1, Q2>(Q1, Q2);
 
-impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for AndQuery<Q1, Q2> {
+impl<X, Q1, Q2> Query<X> for AndQuery<Q1, Q2>
+where
+    X: XConn,
+    Q1: Query<X>,
+    Q2: Query<X>,
+{
     fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
         Ok(self.0.run(id, x)? && self.1.run(id, x)?)
     }
@@ -24,7 +29,12 @@ impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for AndQuery<Q1, Q2> {
 
 struct OrQuery<Q1, Q2>(Q1, Q2);
 
-impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for OrQuery<Q1, Q2> {
+impl<X, Q1, Q2> Query<X> for OrQuery<Q1, Q2>
+where
+    X: XConn,
+    Q1: Query<X>,
+    Q2: Query<X>,
+{
     fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
         Ok(self.0.run(id, x)? || self.1.run(id, x)?)
     }
@@ -32,7 +42,11 @@ impl<X: XConn, Q1: Query<X>, Q2: Query<X>> Query<X> for OrQuery<Q1, Q2> {
 
 struct NotQuery<Q>(Q);
 
-impl<X: XConn, Q: Query<X>> Query<X> for NotQuery<Q> {
+impl<X, Q> Query<X> for NotQuery<Q>
+where
+    X: XConn,
+    Q: Query<X>,
+{
     fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
         Ok(!self.0.run(id, x)?)
     }
@@ -62,21 +76,21 @@ trait QueryExt<X>: Query<X>
 where
     X: XConn,
 {
-    fn and(self, other: impl Query<X>) -> impl Query<X>
+    fn and(self, other: impl Query<X>) -> AndQuery<Self, impl Query<X>>
     where
         Self: Sized,
     {
         AndQuery(self, other)
     }
 
-    fn or(self, other: impl Query<X>) -> impl Query<X>
+    fn or(self, other: impl Query<X>) -> OrQuery<Self, impl Query<X>>
     where
         Self: Sized,
     {
         OrQuery(self, other)
     }
 
-    fn not(self) -> impl Query<X>
+    fn not(self) -> NotQuery<impl Query<X>>
     where
         Self: Sized,
     {
