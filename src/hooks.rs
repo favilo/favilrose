@@ -120,13 +120,15 @@ where
 
 const ZOOM_TILE_TITLES: &'static [&str] = &[
     "Zoom - Free Account",               // main window
-    "Zoom Workplace - Free Account",     // main window
+    "Zoom Workplace - Free account",     // main window
     "Zoom - Licensed Account",           // main window
-    "Zoom Workplace - Licensed Account", // main window
+    "Zoom Workplace - Licensed account", // main window
     "Zoom",                              // meeting window on creation
+    "Zoom Workplace",                              // meeting window on creation
     "Zoom Meeting",                      // meeting window shortly after creation
     "Settings",                          // settings window
     "Metting Chat",                      // chat window
+    "",                                  // main window before renamed to "Zoom Workplace"
 ];
 
 pub fn manage_hook<'a, X: XConn + 'static>() -> Box<dyn ManageHook<X> + 'a> {
