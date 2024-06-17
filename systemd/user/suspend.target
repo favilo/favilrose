@@ -1,0 +1,4 @@
+[Unit]
+Description=User level suspend target
+StopWhenUnneeded=yes
+Wants=i3lock.service

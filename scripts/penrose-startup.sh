@@ -19,9 +19,11 @@ xsetroot -cursor_name left_ptr -solid black
 # xset s 300 600
 # xss-lock -- i3lock -n
 
-pkill -fi xautolock; xautolock -secure -time 10 -locker "i3lock -n" -notify 15 \
-    -notifier "notify-send -t 5000 -i dialog-password -u low 'Security Advisory' '\nLocking Session in 15 seconds'" \
-    -detectsleep &
+pkill -fi xautolock; xautolock -secure -time 15 -locker "systemctl suspend" -notify 300 \
+    -notifier "i3lock -n | xset dpms force off" &
+    # -notifier "notify-send -t 5000 -i dialog-password -u low 'Security Advisory' '\nLocking Session in 15 seconds'" \
+    # `-detectsleep` does the opposite of what I want. It avoids locking the screen when sleep was detected.
+    # -detectsleep &
 
 pkill -fi snixembed; snixembed &
 

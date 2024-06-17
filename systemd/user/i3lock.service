@@ -1,0 +1,14 @@
+[Unit]
+Description=use i3lock to lock the screen
+Before=sleep.target
+Before=suspend.target
+
+[Service]
+Type=forking
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/i3lock -n
+
+[Install]
+WantedBy=sleep.target
+WantedBy=suspend.target
+

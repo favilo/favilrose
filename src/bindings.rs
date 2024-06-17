@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use penrose::{
     builtin::{
-        actions::{exit, floating::sink_focused, modify_with, send_layout_message, spawn},
+        actions::{
+            exit, floating::sink_focused, key_handler, modify_with, send_layout_message, spawn,
+        },
         layout::messages::{ExpandMain, IncMain, ShrinkMain},
     },
     core::{bindings::KeyEventHandler, State},
-    map,
+    map, util,
     x::XConnExt,
     x11rb::RustConn,
 };
@@ -33,7 +35,11 @@ pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>>
         "M-S-Down" => send_layout_message(|| IncMain(-1)),
         "M-S-Right" => send_layout_message(|| ExpandMain),
         "M-S-Left" => send_layout_message(|| ShrinkMain),
-        "M-S-z" => spawn("i3lock"),
+        "M-S-z" => key_handler(|_, _| {
+            util::spawn("i3lock")?;
+            util::spawn("systemctl suspend")?;
+            Ok(())
+        }),
         "M-r" => spawn("dmenu_run"),
         "M-Return" => spawn("alacritty"),
 

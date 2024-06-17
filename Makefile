@@ -21,9 +21,16 @@ install-helpers:
 	@ls bin | xargs -I {} chmod 755 /usr/local/bin/{}
 	@echo ":: Installing ./scripts..."
 	@cp -r scripts /usr/local
+	@echo ":: Installing .service files"
+	@cp -r systemd/user/* /usr/lib/systemd/user/
+	@cp -r systemd/system/* /usr/lib/systemd/system/
 	@ls scripts | xargs -I {} chmod 755 /usr/local/scripts/{}
 	@echo ":: Copying over xsession file..."
 	@cp penrose.desktop /usr/share/xsessions/
+	@echo ":: Remember to run 'systemctl --user daemon-reload'"
+	@echo "::             and 'sudo systemctl daemon-reload'"
+	@echo ":: in order to reload the systemd services"
+	@echo ":: Done""
 
 .PHONY: install-penrose-release
 install-penrose-release:
