@@ -12,7 +12,7 @@ use penrose::{
 };
 
 use favilo_penrose::{
-    bindings::raw_key_bindings, hooks::manage_hook, layouts::layouts, mouse::MouseHandler,
+    bindings::raw_key_bindings, hooks::manage_hook, layouts::layouts, mouse::mouse_bindings,
     STARTUP_SCRIPT,
 };
 
@@ -35,12 +35,10 @@ fn main() -> Result<()> {
 
     // let bar = status_bar().context("Create status bar")?;
 
-    let mouse_bindings = MouseHandler::mouse_bindings();
+    let mouse_bindings = mouse_bindings();
 
     let wm = WindowManager::new(config, key_bindings, mouse_bindings, conn)
         .context("New window manager")?;
-
-    let wm = MouseHandler::install_mouse_handler(wm);
 
     wm.run().context("Window manager run")?;
     Ok(())
@@ -58,7 +56,7 @@ fn setup_logging() -> Result<()> {
     let log_home = penrose_home.join("logs");
     std::fs::create_dir_all(&log_home)?;
 
-    let log_file = File::create(&log_home.join("penrose.log"))?;
+    let log_file = File::create(log_home.join("penrose.log"))?;
 
     tracing_subscriber::fmt()
         .with_env_filter("info")

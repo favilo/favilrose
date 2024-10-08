@@ -3,8 +3,8 @@ use std::time::Duration;
 use penrose::{util::spawn_for_output_with_args, x::XConn, Color};
 use penrose_ui::{
     bar::widgets::{
-        amixer_volume, battery_summary, current_date_and_time, wifi_network, ActiveWindowName,
-        CurrentLayout, IntervalText, Widget, Workspaces,
+        sys::refresh::{amixer_volume, battery_summary, current_date_and_time, wifi_network},
+        ActiveWindowName, CurrentLayout, IntervalText, Widget, Workspaces,
     },
     Position, StatusBar, TextStyle,
 };
@@ -63,11 +63,10 @@ fn current_weather_info(style: TextStyle) -> IntervalText {
 
 // Make a curl request to wttr.in to fetch the current weather information
 // for our location.
-fn get_weather_text() -> String {
+fn get_weather_text() -> Option<String> {
     spawn_for_output_with_args("curl", &["-s", "http://wttr.in?format=%c%t"])
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 struct Empty(u32, bool);

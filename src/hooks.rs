@@ -14,97 +14,6 @@ use penrose::{
 
 use crate::BAR_HEIGHT_PX;
 
-struct AndQuery<Q1, Q2>(Q1, Q2);
-
-impl<X, Q1, Q2> Query<X> for AndQuery<Q1, Q2>
-where
-    X: XConn,
-    Q1: Query<X>,
-    Q2: Query<X>,
-{
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        Ok(self.0.run(id, x)? && self.1.run(id, x)?)
-    }
-}
-
-struct OrQuery<Q1, Q2>(Q1, Q2);
-
-impl<X, Q1, Q2> Query<X> for OrQuery<Q1, Q2>
-where
-    X: XConn,
-    Q1: Query<X>,
-    Q2: Query<X>,
-{
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        Ok(self.0.run(id, x)? || self.1.run(id, x)?)
-    }
-}
-
-struct NotQuery<Q>(Q);
-
-impl<X, Q> Query<X> for NotQuery<Q>
-where
-    X: XConn,
-    Q: Query<X>,
-{
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        Ok(!self.0.run(id, x)?)
-    }
-}
-
-struct AnyQuery<X>(Vec<Box<dyn Query<X>>>);
-
-impl<X: XConn> Query<X> for AnyQuery<X> {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        self.0
-            .iter()
-            .try_fold(false, |acc, query| Ok(acc || query.run(id, x)?))
-    }
-}
-
-struct AllQuery<X>(Vec<Box<dyn Query<X>>>);
-
-impl<X: XConn> Query<X> for AllQuery<X> {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        self.0
-            .iter()
-            .try_fold(true, |acc, query| Ok(acc && query.run(id, x)?))
-    }
-}
-
-trait QueryExt<X>: Query<X>
-where
-    X: XConn,
-{
-    fn and(self, other: impl Query<X>) -> AndQuery<Self, impl Query<X>>
-    where
-        Self: Sized,
-    {
-        AndQuery(self, other)
-    }
-
-    fn or(self, other: impl Query<X>) -> OrQuery<Self, impl Query<X>>
-    where
-        Self: Sized,
-    {
-        OrQuery(self, other)
-    }
-
-    fn not(self) -> NotQuery<impl Query<X>>
-    where
-        Self: Sized,
-    {
-        NotQuery(self)
-    }
-}
-
-impl<X, Q> QueryExt<X> for Q
-where
-    X: XConn,
-    Q: Query<X>,
-{
-}
-
 struct Titles(Vec<&'static str>);
 
 impl<X> Query<X> for Titles
@@ -118,13 +27,13 @@ where
     }
 }
 
-const ZOOM_TILE_TITLES: &'static [&str] = &[
+const ZOOM_TILE_TITLES: &[&str] = &[
     "Zoom - Free Account",               // main window
     "Zoom Workplace - Free account",     // main window
     "Zoom - Licensed Account",           // main window
     "Zoom Workplace - Licensed account", // main window
     "Zoom",                              // meeting window on creation
-    "Zoom Workplace",                              // meeting window on creation
+    "Zoom Workplace",                    // meeting window on creation
     "Zoom Meeting",                      // meeting window shortly after creation
     "Settings",                          // settings window
     "Metting Chat",                      // chat window

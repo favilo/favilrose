@@ -32,7 +32,9 @@ pkill -fi nm-applet; nm-applet &
 # pkill -fi udiskie; udiskie -a -n -t &
 pkill -fi volumeicon; volumeicon &
 pkill -fi xfce4-notifyd
-pkill -fi dunst; dunst &
+# pkill -fi dunst; dunst &
+# pkill -fi wired; wired &
+systemctl --user restart wired.service
 pkill -fi blueman-applet; blueman-applet &
 pkill -fi flameshot; flameshot &
 # pkill -fi xfce4-power-man; xfce4-power-manager &  # for some reason, this ends up running as xcfe4-power-man

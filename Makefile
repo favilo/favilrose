@@ -30,7 +30,7 @@ install-helpers:
 	@echo ":: Remember to run 'systemctl --user daemon-reload'"
 	@echo "::             and 'sudo systemctl daemon-reload'"
 	@echo ":: in order to reload the systemd services"
-	@echo ":: Done""
+	@echo ":: Done"
 
 .PHONY: install-penrose-release
 install-penrose-release:
