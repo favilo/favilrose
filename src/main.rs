@@ -2,7 +2,7 @@
 //!
 //! This file will give you a functional if incredibly minimal window manager that
 //! has multiple workspaces and simple client / workspace movement.
-use std::{fs::File, path::PathBuf, sync::Arc};
+use std::{fs::File, path::PathBuf, str::FromStr, sync::Arc};
 
 use color_eyre::eyre::{Context, Result};
 use penrose::{
@@ -16,7 +16,7 @@ use favilo_penrose::{
     STARTUP_SCRIPT,
 };
 
-use tracing_subscriber::{self, prelude::*};
+use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
 
 fn main() -> Result<()> {
     setup_logging()?;
@@ -25,7 +25,6 @@ fn main() -> Result<()> {
         startup_hook: Some(SpawnOnStartup::boxed(STARTUP_SCRIPT)),
         default_layouts: layouts(),
         manage_hook: Some(manage_hook()),
-        // refresh_hook: Some(refresh_hooks()),
         ..Config::default()
     });
 
@@ -56,13 +55,17 @@ fn setup_logging() -> Result<()> {
     let log_home = penrose_home.join("logs");
     std::fs::create_dir_all(&log_home)?;
 
-    let log_file = File::create(log_home.join("penrose.log"))?;
+    let log_file = tracing_appender::rolling::daily(log_home, "penrose.log");
 
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .with_writer(Arc::new(log_file))
-        .finish()
-        .init();
+    let subsriber = tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::from_str("info").unwrap()),
+        )
+        .with(fmt::Layer::new().with_ansi(false).with_writer(log_file))
+        .with(fmt::Layer::new().pretty().with_writer(std::io::stdout));
+    tracing::subscriber::set_global_default(subsriber)?;
+
     Ok(())
 }
 

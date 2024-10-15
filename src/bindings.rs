@@ -62,7 +62,7 @@ pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>>
         "XF86MonBrightnessUp" => spawn("light -A 5"),
         "XF86MonBrightnessDown" => spawn( "light -U 5"),
 
-        "M-Print" => spawn("flameshot gui"),
+        "M-F10" => spawn("flameshot gui"),
     };
 
     for tag in &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] {
