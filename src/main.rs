@@ -2,7 +2,7 @@
 //!
 //! This file will give you a functional if incredibly minimal window manager that
 //! has multiple workspaces and simple client / workspace movement.
-use std::{fs::File, path::PathBuf, str::FromStr, sync::Arc};
+use std::{path::PathBuf, str::FromStr};
 
 use color_eyre::eyre::{Context, Result};
 use penrose::{
@@ -16,6 +16,7 @@ use favilo_penrose::{
     STARTUP_SCRIPT,
 };
 
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
 
 fn main() -> Result<()> {
@@ -55,7 +56,12 @@ fn setup_logging() -> Result<()> {
     let log_home = penrose_home.join("logs");
     std::fs::create_dir_all(&log_home)?;
 
-    let log_file = tracing_appender::rolling::daily(log_home, "penrose.log");
+    let log_file = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("penrose")
+        .filename_suffix("log")
+        .max_log_files(14)
+        .build(log_home)?;
 
     let subsriber = tracing_subscriber::registry()
         .with(
