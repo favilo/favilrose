@@ -58,7 +58,13 @@ pub fn status_bar<X: XConn>() -> penrose_ui::Result<StatusBar<X>> {
 }
 
 fn current_weather_info(style: TextStyle) -> IntervalText {
-    IntervalText::new(style, get_weather_text, Duration::from_secs(60 * 5))
+    IntervalText::new(
+        style,
+        get_weather_text,
+        Duration::from_secs(60 * 5),
+        false,
+        false,
+    )
 }
 
 // Make a curl request to wttr.in to fetch the current weather information

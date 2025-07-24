@@ -37,11 +37,11 @@ pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>>
         "M-S-Left" => send_layout_message(|| ShrinkMain),
         "M-S-z" => key_handler(|_, _| {
             util::spawn("i3lock")?;
-            util::spawn("systemctl suspend")?;
+            util::spawn("systemctl suspend-then-hibernate")?;
             Ok(())
         }),
         "M-r" => spawn("dmenu_run"),
-        "M-Return" => spawn("alacritty"),
+        "M-Return" => spawn("kitty"),
 
         // Restart the WM because we want to run inside a wrapper script
         "M-q" => exit(),

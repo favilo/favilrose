@@ -4,8 +4,6 @@ export SSH_AUTH_SOCK
 eval $(ssh-agent)
 
 while true; do
-  # log out to a file
-  favilo-penrose &> ~/.penrose.log
-  [[ $? > 0 ]] && mv ~/.penrose.log ~/prev-penrose.log
+  favilo-penrose
   export RESTARTED=true
 done

@@ -132,8 +132,8 @@ impl WmNormalHintsExt for WmNormalHints {
 
 fn get_rect_from_value(value: &serde_json::Value) -> Option<Rect> {
     Some(Rect::new(
-        value.get("x")?.as_u64()? as u32,
-        value.get("y")?.as_u64()? as u32,
+        value.get("x")?.as_u64()? as i32,
+        value.get("y")?.as_u64()? as i32,
         value.get("w")?.as_u64()? as u32,
         value.get("h")?.as_u64()? as u32,
     ))
@@ -367,7 +367,7 @@ impl<X: XConn> ManageHook<X> for NotificationUserSuggested {
         tracing::info!(?hints, ?r, "rect: from base");
         let top_left = RelativeRect::new(1.0 - PADDING, PADDING, PADDING, PADDING)
             .applied_to(&r_screen.geometry());
-        let r = Rect::new(top_left.x - r.w, top_left.y, r.w, r.h);
+        let r = Rect::new(top_left.x - r.w as i32, top_left.y, r.w, r.h);
         tracing::info!(?hints, ?r, ?top_left, "rect: from top_left");
 
         state.client_set.float(client, r)
