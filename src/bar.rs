@@ -49,7 +49,7 @@ pub fn status_bar<X: XConn>() -> penrose_ui::Result<StatusBar<X>> {
             )),
             Box::new(current_weather_info(padded_style)),
             Box::new(wifi_network(padded_style)),
-            // Box::new(battery_summary("BAT1", padded_style)),
+            Box::new(battery_summary("BAT1", padded_style)),
             Box::new(battery_summary("BAT0", padded_style)),
             Box::new(amixer_volume("Master", padded_style)),
             Box::new(current_date_and_time(padded_style)),

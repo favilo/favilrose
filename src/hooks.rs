@@ -228,9 +228,30 @@ impl Query<RustConn> for StaticSizeHints {
     }
 }
 
+struct SubstringProperty(pub &'static str, pub &'static str);
+
+impl SubstringProperty {
+    pub fn builder(prop: &'static str) -> impl Fn(&'static str) -> Self {
+        move |s: &'static str| SubstringProperty(prop, s)
+    }
+}
+
+impl<X: XConn> Query<X> for SubstringProperty {
+    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+        match x.get_prop(self.0, id)? {
+            Some(Prop::UTF8String(strs)) if !strs.is_empty() => Ok(strs[0].contains(self.1)),
+            _ => Ok(false),
+        }
+    }
+}
+
 pub fn manage_hook<'a>() -> Box<dyn ManageHook<RustConn> + 'a> {
     let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
     let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);
+    let zoom_substrings = OneOfQuery::new(
+        &["Zoom", "Meeting", "Settings", "Chat"],
+        SubstringProperty::builder(Atom::NetWmName.as_ref()),
+    );
     let manage_hook = manage_hooks! {
         // Need this to handle the stupid zoom audio notifications
         // _NET_WM_NAME == "zoom", WM_NAME == "", and gravity is static

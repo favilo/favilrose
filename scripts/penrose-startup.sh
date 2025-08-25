@@ -8,8 +8,8 @@
 pid=$$
 pgrep -fi penrose-startup.sh | grep -v "^$pid$" | xargs -I{} kill {}
 
-DISPLAY=:0 xinput set-prop "11" "libinput Tapping Enabled" 1
-DISPLAY=:0 xinput set-prop "11" "libinput Natural Scrolling Enabled" 1
+DISPLAY=:0 xinput set-prop "14" "libinput Tapping Enabled" 1
+DISPLAY=:0 xinput set-prop "14" "libinput Natural Scrolling Enabled" 1
 DISPLAY=:0 xinput map-to-output "ELAN900C:00 04F3:2D25" "eDP-1-1"
 
 DISPLAY=:0 xsetroot -cursor_name left_ptr -solid black
@@ -25,7 +25,7 @@ pkill -fi xautolock; xautolock -secure -time 15 -locker "systemctl suspend-then-
     # `-detectsleep` does the opposite of what I want. It avoids locking the screen when sleep was detected.
     # -detectsleep &
 
-pkill -fi snixembed; snixembed &
+pkill -fi snixembed; snixembed --fork
 
 # kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty_remote_control &
 pkill -fi nm-applet; nm-applet &
