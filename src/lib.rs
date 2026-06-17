@@ -16,6 +16,3 @@ pub const BAR_HEIGHT_PX: u32 = 28;
 const POINT_SIZE: u8 = 10;
 
 const MAX_ACTIVE_WINDOW_CHARS: usize = 50;
-
-
-

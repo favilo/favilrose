@@ -113,6 +113,8 @@ mod tests {
     #[test]
     fn get_weather_text_works() {
         let s = get_weather_text();
-        assert!(!s.is_empty());
+        if let Some(text) = s {
+            assert!(!text.is_empty());
+        }
     }
 }

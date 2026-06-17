@@ -26,7 +26,7 @@ fn main() -> Result<()> {
         startup_hook: Some(SpawnOnStartup::boxed(STARTUP_SCRIPT)),
         default_layouts: layouts(),
         manage_hook: Some(manage_hook()),
-        focus_follow_mouse: false,
+        focus_follow_mouse: true,
         ..Config::default()
     });
 

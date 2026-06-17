@@ -2,14 +2,14 @@ all: build
 
 .PHONY: build
 build:
-	$(shell [[ $EUID -eq 0 ]] && echo "build can not be run as root" && exit 1)
+	@if [ "$$(id -u)" -eq 0 ]; then echo "build can not be run as root"; exit 1; fi
 	@echo ":: Rebuilding in release mode..."
 	@cargo build --release
 
 
 .PHONY: build-debug
 build-debug:
-	$(shell [[ $EUID -eq 0 ]] && echo "build can not be run as root" && exit 1)
+	@if [ "$$(id -u)" -eq 0 ]; then echo "build can not be run as root"; exit 1; fi
 	@echo ":: Rebuilding in debug mode..."
 	@cargo build
 

@@ -238,7 +238,7 @@ impl SubstringProperty {
 
 impl<X: XConn> Query<X> for SubstringProperty {
     fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        match x.get_prop(self.0, id)? {
+        match x.get_prop(id, self.0)? {
             Some(Prop::UTF8String(strs)) if !strs.is_empty() => Ok(strs[0].contains(self.1)),
             _ => Ok(false),
         }
@@ -248,7 +248,7 @@ impl<X: XConn> Query<X> for SubstringProperty {
 pub fn manage_hook<'a>() -> Box<dyn ManageHook<RustConn> + 'a> {
     let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
     let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);
-    let zoom_substrings = OneOfQuery::new(
+    let _zoom_substrings: OneOfQuery<_, _, RustConn> = OneOfQuery::new(
         &["Zoom", "Meeting", "Settings", "Chat"],
         SubstringProperty::builder(Atom::NetWmName.as_ref()),
     );
