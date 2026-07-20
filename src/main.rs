@@ -2,17 +2,23 @@
 //!
 //! This file will give you a functional if incredibly minimal window manager that
 //! has multiple workspaces and simple client / workspace movement.
-use std::{path::PathBuf, str::FromStr};
+use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use color_eyre::eyre::{Context, Result};
 use penrose::{
-    core::{bindings::parse_keybindings_with_xmodmap, Config, WindowManager},
+    core::{Config, WindowManager},
     extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
     x11rb::RustConn,
 };
 
 use favilo_penrose::{
-    bindings::raw_key_bindings, hooks::manage_hook, layouts::layouts, mouse::mouse_bindings,
+    config::{
+        config_path, ensure_config_file, ConfigKeybindingHook, ConfigKeybindingStartup,
+        ConfigWatcher,
+    },
+    hooks::manage_hook,
+    layouts::layouts,
+    mouse::mouse_bindings,
     STARTUP_SCRIPT,
 };
 
@@ -22,24 +28,29 @@ use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
 fn main() -> Result<()> {
     setup_logging()?;
 
-    let config = add_ewmh_hooks(Config {
+    let path = config_path()?;
+    ensure_config_file(&path)?;
+    let keybinding_watcher = ConfigWatcher::new(path)?;
+
+    let mut config = add_ewmh_hooks(Config {
         startup_hook: Some(SpawnOnStartup::boxed(STARTUP_SCRIPT)),
+        event_hook: Some(Box::new(ConfigKeybindingHook)),
         default_layouts: layouts(),
         manage_hook: Some(manage_hook()),
         focus_follow_mouse: true,
         ..Config::default()
     });
+    config.compose_or_set_startup_hook(ConfigKeybindingStartup);
 
     let conn = RustConn::new().context("X conn")?;
-    let key_bindings =
-        parse_keybindings_with_xmodmap(raw_key_bindings()).context("Parse keybindings")?;
 
     // let bar = status_bar().context("Create status bar")?;
 
     let mouse_bindings = mouse_bindings();
 
-    let wm = WindowManager::new(config, key_bindings, mouse_bindings, conn)
+    let mut wm = WindowManager::new(config, HashMap::new(), mouse_bindings, conn)
         .context("New window manager")?;
+    wm.add_extension(keybinding_watcher);
 
     wm.run().context("Window manager run")?;
     Ok(())
@@ -77,15 +88,4 @@ fn setup_logging() -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bindings_parse_correctly_with_xmodmap() {
-        let res = parse_keybindings_with_xmodmap(raw_key_bindings());
-
-        if let Err(e) = res {
-            panic!("{e}");
-        }
-    }
-}
+mod tests {}

@@ -7,18 +7,21 @@ edition = "2021"
 
 [dependencies]
 color-eyre = "0.6.5"
+derive_more = { version = "2.1.1", features = ["as_ref"] }
+notify = "8.2.0"
 penrose = { version = "0.4.0", features = ["serde"] }
 penrose_ui = "0.4.0"
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.145"
+serde_path_to_error = "0.1.20"
 simplelog = "0.12.2"
+strum = { version = "0.28.0", features = ["derive"] }
+toml = "1.1.0"
 tracing = "0.1.43"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 x11rb = "0.13.2"
 x11rb-protocol = "0.13.2"
-
-[profile.dev.package.backtrace]
-opt-level = 3
 
 [patch.crates-io]
 # penrose = { path = "../penrose/" }

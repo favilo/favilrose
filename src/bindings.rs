@@ -1,101 +1,88 @@
 use std::collections::HashMap;
 
+use color_eyre::eyre::Result;
 use penrose::{
     builtin::{
-        actions::{
-            exit, floating::sink_focused, key_handler, modify_with, send_layout_message, spawn,
-        },
+        actions::{exit, floating::sink_focused, key_handler, modify_with, send_layout_message},
         layout::messages::{ExpandMain, IncMain, ShrinkMain},
     },
     core::{bindings::KeyEventHandler, State},
-    map, util,
+    util,
     x::XConnExt,
     x11rb::RustConn,
 };
 
-pub fn raw_key_bindings() -> HashMap<String, Box<dyn KeyEventHandler<RustConn>>> {
-    let mut raw_bindings = map! {
-        map_keys: |k: &str| k.to_string();
+use crate::config::{Action, Command, PenroseConfig, Program};
 
-        "M-j" => modify_with(|cs| cs.focus_down()),
-        "M-k" => modify_with(|cs| cs.focus_up()),
-        "M-S-j" => modify_with(|cs| cs.swap_down()),
-        "M-S-k" => modify_with(|cs| cs.swap_up()),
-        "M-S-c" => modify_with(|cs| cs.kill_focused()),
-        "M-t" => sink_focused(),
+pub fn key_bindings(
+    config: &PenroseConfig,
+) -> Result<HashMap<String, Box<dyn KeyEventHandler<RustConn>>>> {
+    Ok(config
+        .keybindings
+        .iter()
+        .map(|(key, action)| (key.as_ref().clone(), action_handler(*action, config)))
+        .collect())
+}
 
-        "M-Tab" => modify_with(|cs| cs.toggle_tag()),
-        "M-bracketright" => modify_with(|cs| cs.next_screen()),
-        "M-bracketleft" => modify_with(|cs| cs.previous_screen()),
-        "M-grave" => modify_with(|cs| cs.next_layout()),
-        "M-S-grave" => modify_with(|cs| cs.previous_layout()),
-        "M-S-comma" => send_layout_message(|| IncMain(1)),
-        "M-S-period" => send_layout_message(|| IncMain(-1)),
-        "M-S-Up" => send_layout_message(|| IncMain(1)),
-        "M-S-Down" => send_layout_message(|| IncMain(-1)),
-        "M-S-Right" => send_layout_message(|| ExpandMain),
-        "M-S-Left" => send_layout_message(|| ShrinkMain),
-        "M-S-z" => key_handler(|_, _| {
-            util::spawn("i3lock")?;
-            util::spawn("systemctl suspend-then-hibernate")?;
-            Ok(())
-        }),
-        "M-r" => spawn("dmenu_run"),
-        "M-Return" => spawn("kitty"),
-
-        // Restart the WM because we want to run inside a wrapper script
-        "M-q" => exit(),
-        // Kill the WM
-        "M-S-q" => spawn("pkill -fi penrose"),
-
-        // Volume control
-        "XF86AudioRaiseVolume" => spawn("pactl set-sink-volume @DEFAULT_SINK@ +5%"),
-        "XF86AudioLowerVolume" => spawn("pactl set-sink-volume @DEFAULT_SINK@ -5%"),
-        "XF86AudioMute" => spawn("pactl set-sink-mute @DEFAULT_SINK@ toggle"),
-
-        // Media control
-        "XF86AudioPlay" => spawn("playerctl play-pause"),
-        "XF86AudioNext" => spawn("playerctl next"),
-        "XF86AudioPrev" => spawn("playerctl previous"),
-
-        // Brightness control
-        "XF86MonBrightnessUp" => spawn("light -A 5"),
-        "XF86MonBrightnessDown" => spawn( "light -U 5"),
-
-        "M-F10" => spawn("flameshot gui"),
-    };
-
-    for tag in &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] {
-        let focus_tag: Box<dyn KeyEventHandler<RustConn>> = Box::new(
-            move |state: &mut State<RustConn>, x: &RustConn| -> penrose::Result<()> {
-                // let current_mouse = state
-                //     .extension::<MouseHandler>()?
-                //     .borrow()
-                //     .current_mouse_position();
-                let client_set = &mut state.client_set;
-                // let screen = client_set
-                //     .screens()
-                //     .find(|s| s.geometry().contains_point(current_mouse));
-                let screen = None::<&penrose::pure::Screen<RustConn>>;
-                match screen {
-                    // TODO: Lets add some methods to the penrose crate
-                    Some(_screen) => todo!("We need to implement this in the penrose crate"),
-                    None => {
-                        client_set.pull_tag_to_screen(tag);
-                    }
-                };
-
+fn action_handler(action: Action, config: &PenroseConfig) -> Box<dyn KeyEventHandler<RustConn>> {
+    match action {
+        Action::FocusDown => modify_with(|clients| clients.focus_down()),
+        Action::FocusUp => modify_with(|clients| clients.focus_up()),
+        Action::SwapDown => modify_with(|clients| clients.swap_down()),
+        Action::SwapUp => modify_with(|clients| clients.swap_up()),
+        Action::KillFocused => modify_with(|clients| clients.kill_focused()),
+        Action::SinkFocused => sink_focused(),
+        Action::ToggleTag => modify_with(|clients| clients.toggle_tag()),
+        Action::NextScreen => modify_with(|clients| clients.next_screen()),
+        Action::PreviousScreen => modify_with(|clients| clients.previous_screen()),
+        Action::NextLayout => modify_with(|clients| clients.next_layout()),
+        Action::PreviousLayout => modify_with(|clients| clients.previous_layout()),
+        Action::IncreaseMain => send_layout_message(|| IncMain(1)),
+        Action::DecreaseMain => send_layout_message(|| IncMain(-1)),
+        Action::ExpandMain => send_layout_message(|| ExpandMain),
+        Action::ShrinkMain => send_layout_message(|| ShrinkMain),
+        Action::LockAndSuspend => lock_and_suspend_handler(config),
+        Action::Launcher => spawn_program(config.command(Program::Launcher)),
+        Action::Terminal => spawn_program(config.command(Program::Terminal)),
+        Action::Restart => exit(),
+        Action::Quit => spawn_program(config.command(Program::Quit)),
+        Action::VolumeUp => spawn_program(config.command(Program::VolumeUp)),
+        Action::VolumeDown => spawn_program(config.command(Program::VolumeDown)),
+        Action::VolumeMute => spawn_program(config.command(Program::VolumeMute)),
+        Action::MediaPlayPause => spawn_program(config.command(Program::MediaPlayPause)),
+        Action::MediaNext => spawn_program(config.command(Program::MediaNext)),
+        Action::MediaPrevious => spawn_program(config.command(Program::MediaPrevious)),
+        Action::BrightnessUp => spawn_program(config.command(Program::BrightnessUp)),
+        Action::BrightnessDown => spawn_program(config.command(Program::BrightnessDown)),
+        Action::Screenshot => spawn_program(config.command(Program::Screenshot)),
+        Action::FocusTag(tag) => focus_tag_handler(tag),
+        Action::MoveFocusTo(tag) => {
+            key_handler(move |state: &mut State<RustConn>, x: &RustConn| {
+                state.client_set.move_focused_to_tag(tag.to_string());
                 x.refresh(state)
-            },
-        );
-        raw_bindings.extend([
-            (format!("M-{tag}"), focus_tag),
-            (
-                format!("M-S-{tag}"),
-                modify_with(move |client_set| client_set.move_focused_to_tag(tag)),
-            ),
-        ]);
+            })
+        }
     }
+}
 
-    raw_bindings
+fn lock_and_suspend_handler(config: &PenroseConfig) -> Box<dyn KeyEventHandler<RustConn>> {
+    let lock = config.command(Program::Lock);
+    let suspend = config.command(Program::Suspend);
+
+    key_handler(move |_, _| {
+        util::spawn(lock.as_ref().clone())?;
+        util::spawn(suspend.as_ref().clone())?;
+        Ok(())
+    })
+}
+
+fn spawn_program(command: Command) -> Box<dyn KeyEventHandler<RustConn>> {
+    key_handler(move |_, _| util::spawn(command.as_ref().clone()))
+}
+
+fn focus_tag_handler(tag: u8) -> Box<dyn KeyEventHandler<RustConn>> {
+    key_handler(move |state: &mut State<RustConn>, x: &RustConn| {
+        state.client_set.pull_tag_to_screen(tag.to_string());
+        x.refresh(state)
+    })
 }
