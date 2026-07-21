@@ -12,7 +12,7 @@ use std::{
 };
 
 use color_eyre::eyre::{eyre, Context, Report, Result};
-use derive_more::AsRef;
+use derive_more::{AsRef, Debug};
 use notify::{
     event::ModifyKind, recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
     Watcher,
@@ -39,6 +39,7 @@ use x11rb::{
 };
 
 use crate::bindings;
+use crate::extensions::stack_set::Direction;
 
 const CONFIG_FILE: &str = "config.toml";
 const RELOAD_PROPERTY: &[u8] = b"_FAVILROSE_CONFIG_RELOAD";
@@ -106,6 +107,8 @@ pub enum Action {
     Screenshot,
     FocusTag(u8),
     MoveFocusTo(u8),
+    FocusDirection(Direction),
+    MoveDirection(Direction),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -121,10 +124,14 @@ impl Default for PenroseConfig {
     fn default() -> Self {
         Self {
             keybindings: BTreeMap::from([
-                binding("M-j", Action::FocusDown),
-                binding("M-k", Action::FocusUp),
-                binding("M-S-j", Action::SwapDown),
-                binding("M-S-k", Action::SwapUp),
+                binding("M-h", Action::FocusDirection(Direction::Left)),
+                binding("M-j", Action::FocusDirection(Direction::Down)),
+                binding("M-k", Action::FocusDirection(Direction::Up)),
+                binding("M-l", Action::FocusDirection(Direction::Right)),
+                binding("M-S-h", Action::MoveDirection(Direction::Left)),
+                binding("M-S-j", Action::MoveDirection(Direction::Down)),
+                binding("M-S-k", Action::MoveDirection(Direction::Up)),
+                binding("M-S-l", Action::MoveDirection(Direction::Right)),
                 binding("M-S-c", Action::KillFocused),
                 binding("M-t", Action::SinkFocused),
                 binding("M-Tab", Action::ToggleTag),
@@ -599,10 +606,15 @@ mod tests {
 
         assert!(serialized.contains("M-Return = \"terminal\""));
         assert!(serialized.contains("[keybindings.M-1]\nfocus_tag = 1"));
+        assert!(serialized.contains("[keybindings.M-h]\nfocus_direction = \"left\""));
         parsed.validate().expect("validate default configuration");
         assert_eq!(
             parsed.keybindings.get(&Keybinding("M-1".to_owned())),
             Some(&Action::FocusTag(1))
+        );
+        assert_eq!(
+            parsed.keybindings.get(&Keybinding("M-S-l".to_owned())),
+            Some(&Action::MoveDirection(Direction::Right))
         );
         assert!(bindings::key_bindings(&parsed).is_ok());
     }

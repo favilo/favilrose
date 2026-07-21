@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 color-eyre = "0.6.5"
-derive_more = { version = "2.1.1", features = ["as_ref"] }
+derive_more = { version = "2.1.1", features = ["as_ref", "debug"] }
 notify = "8.2.0"
 penrose = { version = "0.4.0", features = ["serde"] }
 penrose_ui = "0.4.0"

@@ -8,11 +8,17 @@ use penrose::{
     },
     core::{bindings::KeyEventHandler, State},
     util,
-    x::XConnExt,
+    x::{XConn, XConnExt},
     x11rb::RustConn,
 };
 
-use crate::config::{Action, Command, PenroseConfig, Program};
+use crate::{
+    config::{Action, Command, PenroseConfig, Program},
+    extensions::{
+        directional_navigation_history::DirectionalNavigationHistory,
+        stack_set::{Direction, StackSetExt},
+    },
+};
 
 pub fn key_bindings(
     config: &PenroseConfig,
@@ -62,6 +68,8 @@ fn action_handler(action: Action, config: &PenroseConfig) -> Box<dyn KeyEventHan
                 x.refresh(state)
             })
         }
+        Action::FocusDirection(direction) => focus_direction_handler(direction),
+        Action::MoveDirection(direction) => move_direction_handler(direction),
     }
 }
 
@@ -84,5 +92,60 @@ fn focus_tag_handler(tag: u8) -> Box<dyn KeyEventHandler<RustConn>> {
     key_handler(move |state: &mut State<RustConn>, x: &RustConn| {
         state.client_set.pull_tag_to_screen(tag.to_string());
         x.refresh(state)
+    })
+}
+
+fn focus_direction_handler<X>(direction: Direction) -> Box<dyn KeyEventHandler<X>>
+where
+    X: XConn + 'static,
+{
+    key_handler(move |state: &mut State<X>, x: &X| {
+        let origin = state.client_set.current_client().copied();
+        let preferred = origin.and_then(|focused| {
+            let history = state.extension_or_default::<DirectionalNavigationHistory>();
+            let mut history = history.borrow_mut();
+            history.preferred_origin(&state.client_set, focused)
+        });
+        let destination =
+            state
+                .client_set
+                .focus_in_direction(direction, preferred.as_ref(), |client| {
+                    x.client_geometry(*client)
+                        .inspect_err(|error| {
+                            tracing::debug!(?error, ?client, "read client geometry")
+                        })
+                        .ok()
+                });
+
+        if let (Some(origin), Some(destination)) = (origin, destination) {
+            let history = state.extension_or_default::<DirectionalNavigationHistory>();
+            history
+                .borrow_mut()
+                .record(&state.client_set, origin, destination);
+            x.refresh(state)?;
+        }
+
+        Ok(())
+    })
+}
+
+fn move_direction_handler<X>(direction: Direction) -> Box<dyn KeyEventHandler<X>>
+where
+    X: XConn + 'static,
+{
+    key_handler(move |state: &mut State<X>, x: &X| {
+        let moved = state
+            .client_set
+            .swap_in_direction(direction, None, |client| {
+                x.client_geometry(*client)
+                    .inspect_err(|error| tracing::debug!(?error, ?client, "read client geometry"))
+                    .ok()
+            });
+
+        if moved.is_some() {
+            x.refresh(state)?;
+        }
+
+        Ok(())
     })
 }

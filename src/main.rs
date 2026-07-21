@@ -16,6 +16,7 @@ use favilo_penrose::{
         config_path, ensure_config_file, ConfigKeybindingHook, ConfigKeybindingStartup,
         ConfigWatcher,
     },
+    extensions::directional_navigation_history::DirectionalNavigationHistoryHook,
     hooks::manage_hook,
     layouts::layouts,
     mouse::mouse_bindings,
@@ -41,6 +42,7 @@ fn main() -> Result<()> {
         ..Config::default()
     });
     config.compose_or_set_startup_hook(ConfigKeybindingStartup);
+    config.compose_or_set_refresh_hook(DirectionalNavigationHistoryHook);
 
     let conn = RustConn::new().context("X conn")?;
 

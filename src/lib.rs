@@ -1,6 +1,7 @@
 pub mod bar;
 pub mod bindings;
 pub mod config;
+pub mod extensions;
 pub mod hooks;
 pub mod layouts;
 pub mod mouse;
