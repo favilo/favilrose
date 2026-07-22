@@ -2,9 +2,20 @@
 //!
 //! This file will give you a functional if incredibly minimal window manager that
 //! has multiple workspaces and simple client / workspace movement.
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
 
-use color_eyre::eyre::{Context, Result};
+use std::{collections::HashMap, env, path::PathBuf};
+
+use color_eyre::eyre::{eyre, Context, Result};
 use penrose::{
     core::{Config, WindowManager},
     extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
@@ -61,11 +72,11 @@ fn main() -> Result<()> {
 fn setup_logging() -> Result<()> {
     color_eyre::install()?;
 
-    // Create log directory if it doesn't exist
-    let config_home = PathBuf::from(
-        std::env::var("XDG_CONFIG_HOME")
-            .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap())),
-    );
+    let config_home = match env::var_os("XDG_CONFIG_HOME") {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(env::var_os("HOME").ok_or_else(|| eyre!("HOME is not set"))?)
+            .join(".config"),
+    };
     let penrose_home = config_home.join("penrose");
     let log_home = penrose_home.join("logs");
     std::fs::create_dir_all(&log_home)?;
@@ -77,11 +88,9 @@ fn setup_logging() -> Result<()> {
         .max_log_files(14)
         .build(log_home)?;
 
+    let env_filter = EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("info"))?;
     let subsriber = tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::from_str("info").unwrap()),
-        )
+        .with(env_filter)
         .with(fmt::Layer::new().with_ansi(false).with_writer(log_file))
         .with(fmt::Layer::new().pretty().with_writer(std::io::stdout));
     tracing::subscriber::set_global_default(subsriber)?;

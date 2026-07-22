@@ -216,11 +216,16 @@ impl PenroseConfig {
         self
     }
 
-    pub fn command(&self, program: Program) -> Command {
+    /// Return the configured command for `program`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration omits `program`.
+    pub fn command(&self, program: Program) -> Result<Command> {
         self.programs
             .get(&program)
-            .expect("validated configuration contains every program")
-            .clone()
+            .cloned()
+            .ok_or_else(|| eyre!("program is missing from configuration: {program:?}"))
     }
 
     fn validate(&self) -> Result<()> {
@@ -241,6 +246,11 @@ fn program(program: Program, command: &str) -> (Program, Command) {
     (program, Command(command.to_owned()))
 }
 
+/// Return the user's favilrose configuration path.
+///
+/// # Errors
+///
+/// Returns an error when `HOME` is not set.
 pub fn config_path() -> Result<PathBuf> {
     let home = env::var_os("HOME").ok_or_else(|| eyre!("HOME is not set"))?;
     Ok(PathBuf::from(home)
@@ -248,6 +258,11 @@ pub fn config_path() -> Result<PathBuf> {
         .join(CONFIG_FILE))
 }
 
+/// Create a commented default configuration when `path` does not exist.
+///
+/// # Errors
+///
+/// Returns an error if defaults cannot be serialized or the file cannot be created or written.
 pub fn ensure_config_file(path: &Path) -> Result<()> {
     if path.exists() {
         return Ok(());
@@ -276,8 +291,15 @@ pub fn ensure_config_file(path: &Path) -> Result<()> {
 fn commented_default_config() -> Result<String> {
     let config = toml::to_string_pretty(&PenroseConfig::default())
         .wrap_err("serialize default configuration")?;
+    let mut commented = String::with_capacity(config.len());
 
-    Ok(config.lines().map(|line| format!("# {line}\n")).collect())
+    for line in config.lines() {
+        commented.push_str("# ");
+        commented.push_str(line);
+        commented.push('\n');
+    }
+
+    Ok(commented)
 }
 
 fn parse_config(contents: &str) -> Result<PenroseConfig> {
@@ -385,11 +407,16 @@ pub struct ConfigWatcher {
 }
 
 impl ConfigWatcher {
+    /// Watch `path` and load its initial keybindings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration cannot be loaded or the file watcher cannot start.
     pub fn new(path: PathBuf) -> Result<Self> {
         let key_bindings = load_key_bindings(&path)?;
         let (sender, changes) = channel();
         let (write_sender, write_events) = channel();
-        let debounce_worker = thread::spawn(move || debounce_writes(write_events, sender));
+        let debounce_worker = thread::spawn(move || debounce_writes(&write_events, &sender));
         let watched_path = path.clone();
         let mut watcher = recommended_watcher(move |event: notify::Result<Event>| match event {
             Ok(event) if is_config_write(&event, &watched_path) => {
@@ -496,17 +523,17 @@ impl ConfigWatcher {
 }
 
 fn is_config_write(event: &Event, path: &Path) -> bool {
-    event.paths.iter().any(|changed| changed == path) && is_write_event(&event.kind)
+    event.paths.iter().any(|changed| changed == path) && is_write_event(event.kind)
 }
 
-fn is_write_event(kind: &EventKind) -> bool {
+fn is_write_event(kind: EventKind) -> bool {
     matches!(
         kind,
         EventKind::Create(_) | EventKind::Modify(ModifyKind::Data(_))
     )
 }
 
-fn debounce_writes(write_events: Receiver<()>, changes: Sender<()>) {
+fn debounce_writes(write_events: &Receiver<()>, changes: &Sender<()>) {
     while write_events.recv().is_ok() {
         while write_events.recv_timeout(RELOAD_DEBOUNCE).is_ok() {}
 
@@ -568,7 +595,12 @@ impl StateHook<RustConn> for ConfigKeybindingStartup {
 
 fn wake_window_manager() -> Result<()> {
     let (connection, _) = RustConnection::connect(None).wrap_err("connect to X server")?;
-    let root = connection.setup().roots[0].root;
+    let root = connection
+        .setup()
+        .roots
+        .first()
+        .ok_or_else(|| eyre!("X server did not report any screens"))?
+        .root;
     let property = connection
         .intern_atom(false, RELOAD_PROPERTY)
         .wrap_err("intern reload property")?
@@ -625,7 +657,7 @@ mod tests {
             .expect("parse commented defaults");
 
         assert_eq!(
-            config.command(Program::Terminal),
+            config.command(Program::Terminal).expect("terminal command"),
             Command("wezterm".to_owned())
         );
         assert_eq!(
@@ -640,13 +672,25 @@ mod tests {
             .expect("parse override configuration");
 
         assert_eq!(
-            config.command(Program::Terminal),
+            config.command(Program::Terminal).expect("terminal command"),
             Command("alacritty".to_owned())
         );
         assert_eq!(
-            config.command(Program::Launcher),
+            config.command(Program::Launcher).expect("launcher command"),
             Command("dmenu_run".to_owned())
         );
+    }
+
+    #[test]
+    fn missing_program_command_returns_an_error() {
+        let mut config = PenroseConfig::default();
+        config.programs.remove(&Program::Terminal);
+
+        let error = config
+            .command(Program::Terminal)
+            .expect_err("reject missing program command");
+
+        assert!(error.to_string().contains("Terminal"));
     }
 
     #[test]
@@ -679,9 +723,9 @@ mod tests {
     fn only_write_events_request_a_reload() {
         use notify::event::{AccessKind, CreateKind, DataChange};
 
-        assert!(!is_write_event(&EventKind::Access(AccessKind::Read)));
-        assert!(is_write_event(&EventKind::Create(CreateKind::File)));
-        assert!(is_write_event(&EventKind::Modify(ModifyKind::Data(
+        assert!(!is_write_event(EventKind::Access(AccessKind::Read)));
+        assert!(is_write_event(EventKind::Create(CreateKind::File)));
+        assert!(is_write_event(EventKind::Modify(ModifyKind::Data(
             DataChange::Content
         ))));
     }

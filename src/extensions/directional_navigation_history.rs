@@ -112,6 +112,28 @@ mod tests {
     }
 
     #[test]
+    fn latest_origin_replaces_the_previous_origin() {
+        let client_set = stack_set();
+        let mut history = DirectionalNavigationHistory::default();
+        history.record(&client_set, xid(1), xid(2));
+
+        history.record(&client_set, xid(3), xid(2));
+
+        assert_eq!(history.preferred_origin(&client_set, xid(2)), Some(xid(3)));
+    }
+
+    #[test]
+    fn record_ignores_clients_outside_the_current_workspace() {
+        let client_set = stack_set();
+        let mut history = DirectionalNavigationHistory::default();
+
+        history.record(&client_set, xid(99), xid(2));
+        history.record(&client_set, xid(1), xid(99));
+
+        assert!(history.origins_by_destination.is_empty());
+    }
+
+    #[test]
     fn reverse_navigation_prefers_the_last_directional_origin() {
         let mut client_set = stack_set();
         client_set.focus_client(&xid(1));
@@ -151,9 +173,11 @@ mod tests {
         let mut history = DirectionalNavigationHistory::default();
         history.record(&client_set, xid(3), xid(1));
 
-        client_set.swap_in_direction(Direction::Right, None, |client| {
-            geometry.get(client).copied()
-        });
+        client_set
+            .swap_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            })
+            .expect("swap clients");
 
         assert_eq!(history.preferred_origin(&client_set, xid(1)), Some(xid(3)));
         assert_eq!(history.preferred_origin(&client_set, xid(2)), None);
@@ -182,6 +206,19 @@ mod tests {
 
         assert_eq!(history.preferred_origin(&client_set, xid(2)), None);
         assert!(history.origins_by_destination.is_empty());
+    }
+
+    #[test]
+    fn pruning_a_stale_entry_preserves_live_history() {
+        let mut client_set = stack_set();
+        let mut history = DirectionalNavigationHistory::default();
+        history.record(&client_set, xid(1), xid(2));
+        history.record(&client_set, xid(2), xid(3));
+
+        client_set.remove_client(&xid(1));
+
+        assert_eq!(history.preferred_origin(&client_set, xid(2)), None);
+        assert_eq!(history.preferred_origin(&client_set, xid(3)), Some(xid(2)));
     }
 
     #[test]

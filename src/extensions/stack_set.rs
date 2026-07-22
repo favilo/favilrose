@@ -3,6 +3,7 @@ use std::{
     hash::Hash,
 };
 
+use color_eyre::eyre::{eyre, Result};
 use derive_more::Debug;
 use penrose::pure::{geometry::Rect, Position, Stack, StackSet};
 use serde::{Deserialize, Serialize};
@@ -38,12 +39,17 @@ where
     where
         F: FnMut(&C) -> Option<Rect>;
 
+    /// Swap the focused client with the selected directional neighbor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current stack cannot be mutated without losing clients.
     fn swap_in_direction<F>(
         &mut self,
         direction: Direction,
         preferred: Option<&C>,
         geometry: F,
-    ) -> Option<C>
+    ) -> Result<Option<C>>
     where
         F: FnMut(&C) -> Option<Rect>;
 }
@@ -104,16 +110,36 @@ where
         direction: Direction,
         preferred: Option<&C>,
         geometry: F,
-    ) -> Option<C>
+    ) -> Result<Option<C>>
     where
         F: FnMut(&C) -> Option<Rect>,
     {
-        let neighbor = self.neighbor_in_direction(direction, preferred, geometry)?;
-        let focused = self.current_client()?.clone();
+        let Some(neighbor) = self.neighbor_in_direction(direction, preferred, geometry) else {
+            return Ok(None);
+        };
+        let focused = self
+            .current_client()
+            .cloned()
+            .ok_or_else(|| eyre!("directional swap has no focused client"))?;
+        let mut outcome = Err(eyre!("directional swap has no occupied stack"));
 
-        self.modify_occupied(|stack| swap_clients(stack, &focused, &neighbor));
+        self.modify_occupied(|stack| {
+            let original = stack.clone();
 
-        Some(neighbor)
+            match swap_clients(stack, &focused, &neighbor) {
+                Ok(swapped) => {
+                    outcome = Ok(());
+                    swapped
+                }
+                Err(error) => {
+                    outcome = Err(error);
+                    original
+                }
+            }
+        });
+        outcome?;
+
+        Ok(Some(neighbor))
     }
 }
 
@@ -185,20 +211,20 @@ fn midpoint_offset(first_start: i64, first_end: i64, second_start: i64, second_e
     (first_midpoint - second_midpoint).abs()
 }
 
-fn swap_clients<C>(stack: Stack<C>, focused: &C, neighbor: &C) -> Stack<C>
+fn swap_clients<C>(stack: Stack<C>, focused: &C, neighbor: &C) -> Result<Stack<C>>
 where
     C: Clone + Eq,
 {
     let focused_index = stack
         .iter()
         .position(|client| client == focused)
-        .expect("focused client is in the current stack");
+        .ok_or_else(|| eyre!("focused client is not in the current stack"))?;
     let neighbor_index = stack
         .iter()
         .position(|client| client == neighbor)
-        .expect("selected neighbor is in the current stack");
+        .ok_or_else(|| eyre!("selected neighbor is not in the current stack"))?;
     let (focused, remainder) = stack.remove_focused();
-    let mut remainder = remainder.expect("directional swap requires a neighbor");
+    let mut remainder = remainder.ok_or_else(|| eyre!("directional swap requires a neighbor"))?;
 
     if remainder.len() == 1 {
         let position = if focused_index < neighbor_index {
@@ -208,45 +234,47 @@ where
         };
         remainder.insert_at(position, focused.clone());
         remainder.focus_element(&focused);
-        return remainder;
+        return Ok(remainder);
     }
 
     let (neighbor, remainder) = remainder.remove(neighbor);
-    let neighbor = neighbor.expect("selected neighbor is in the remaining stack");
-    let mut remainder = remainder.expect("directional swap leaves one client");
+    let neighbor = neighbor.ok_or_else(|| eyre!("selected neighbor could not be removed"))?;
+    let mut remainder = remainder.ok_or_else(|| eyre!("directional swap leaves no clients"))?;
 
     match focused_index.cmp(&neighbor_index) {
         Ordering::Less => {
-            insert_at_index(&mut remainder, focused_index, neighbor);
-            insert_at_index(&mut remainder, neighbor_index, focused.clone());
+            insert_at_index(&mut remainder, focused_index, neighbor)?;
+            insert_at_index(&mut remainder, neighbor_index, focused.clone())?;
         }
         Ordering::Greater => {
-            insert_at_index(&mut remainder, neighbor_index, focused.clone());
-            insert_at_index(&mut remainder, focused_index, neighbor);
+            insert_at_index(&mut remainder, neighbor_index, focused.clone())?;
+            insert_at_index(&mut remainder, focused_index, neighbor)?;
         }
-        Ordering::Equal => unreachable!("a directional neighbor cannot be focused"),
+        Ordering::Equal => return Err(eyre!("directional neighbor is the focused client")),
     }
 
     remainder.focus_element(&focused);
-    remainder
+    Ok(remainder)
 }
 
-fn insert_at_index<C>(stack: &mut Stack<C>, index: usize, client: C)
+fn insert_at_index<C>(stack: &mut Stack<C>, index: usize, client: C) -> Result<()>
 where
     C: Clone + Eq,
 {
     if index == stack.len() {
         stack.insert_at(Position::Tail, client);
-        return;
+        return Ok(());
     }
 
     let anchor = stack
         .iter()
         .nth(index)
         .cloned()
-        .expect("insertion index is within the stack");
+        .ok_or_else(|| eyre!("insertion index is outside the stack"))?;
     stack.focus_element(&anchor);
     stack.insert_at(Position::Before, client);
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -271,6 +299,172 @@ mod tests {
         stack_set.focus_client(&focused);
 
         stack_set
+    }
+
+    fn clients(stack_set: &StackSet<u8>) -> Vec<u8> {
+        stack_set
+            .current_stack()
+            .expect("occupied stack")
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn empty_workspace_has_no_directional_neighbor() {
+        let stack_set = StackSet::<u8>::try_new(
+            LayoutStack::default(),
+            ["one"],
+            [Rect::new(0, 0, 1_000, 1_000)],
+        )
+        .expect("create stack set");
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |_| {
+                panic!("geometry should not be queried without a focused client")
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_focused_geometry_has_no_directional_neighbor() {
+        let stack_set = stack_set(&[1, 2], 1);
+        let geometry = HashMap::from([(2, Rect::new(100, 0, 100, 100))]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_candidate_geometry_does_not_hide_other_candidates() {
+        let stack_set = stack_set(&[1, 2, 3], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (3, Rect::new(100, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            }),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn selects_a_neighbor_in_each_direction() {
+        let stack_set = stack_set(&[1, 2, 3, 4, 5], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(100, 100, 100, 100)),
+            (2, Rect::new(0, 100, 100, 100)),
+            (3, Rect::new(100, 200, 100, 100)),
+            (4, Rect::new(100, 0, 100, 100)),
+            (5, Rect::new(200, 100, 100, 100)),
+        ]);
+
+        for (direction, expected) in [
+            (Direction::Left, 2),
+            (Direction::Down, 3),
+            (Direction::Up, 4),
+            (Direction::Right, 5),
+        ] {
+            assert_eq!(
+                stack_set.neighbor_in_direction(direction, None, |client| {
+                    geometry.get(client).copied()
+                }),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn overlapping_candidate_is_not_directional() {
+        let stack_set = stack_set(&[1, 2], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (2, Rect::new(50, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn edge_distance_precedes_perpendicular_overlap() {
+        let stack_set = stack_set(&[1, 2, 3], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(100, 0, 100, 100)),
+            (2, Rect::new(0, 200, 100, 100)),
+            (3, Rect::new(-100, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Left, None, |client| {
+                geometry.get(client).copied()
+            }),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn midpoint_alignment_breaks_equal_overlap_ties() {
+        let stack_set = stack_set(&[1, 2, 3], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (2, Rect::new(100, -50, 100, 100)),
+            (3, Rect::new(100, 50, 100, 50)),
+        ]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            }),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn client_id_breaks_equal_geometry_ties() {
+        let stack_set = stack_set(&[1, 3, 2], 1);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (2, Rect::new(100, 0, 100, 100)),
+            (3, Rect::new(100, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set.neighbor_in_direction(Direction::Right, None, |client| {
+                geometry.get(client).copied()
+            }),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn swap_reports_an_invalid_focused_client() {
+        let stack = Stack::try_from_iter([1, 2]).expect("create stack");
+
+        let error = swap_clients(stack, &3, &2).expect_err("reject missing focused client");
+
+        assert!(error.to_string().contains("focused client"));
+    }
+
+    #[test]
+    fn swap_reports_an_invalid_neighbor() {
+        let stack = Stack::try_from_iter([1, 2]).expect("create stack");
+
+        let error = swap_clients(stack, &1, &3).expect_err("reject missing neighbor");
+
+        assert!(error.to_string().contains("neighbor"));
     }
 
     #[test]
@@ -383,9 +577,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            stack_set.swap_in_direction(Direction::Right, None, |client| {
-                geometry.get(client).copied()
-            }),
+            stack_set
+                .swap_in_direction(Direction::Right, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
             Some(4)
         );
         assert_eq!(stack_set.current_client(), Some(&2));
@@ -401,6 +597,47 @@ mod tests {
     }
 
     #[test]
+    fn swaps_adjacent_clients_and_preserves_focus() {
+        let mut stack_set = stack_set(&[1, 2, 3], 2);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (2, Rect::new(100, 0, 100, 100)),
+            (3, Rect::new(200, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set
+                .swap_in_direction(Direction::Right, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
+            Some(3)
+        );
+        assert_eq!(stack_set.current_client(), Some(&2));
+        assert_eq!(clients(&stack_set), vec![1, 3, 2]);
+    }
+
+    #[test]
+    fn swaps_head_and_tail_clients() {
+        let mut stack_set = stack_set(&[1, 2, 3, 4], 4);
+        let geometry = HashMap::from([
+            (1, Rect::new(0, 0, 100, 100)),
+            (4, Rect::new(300, 0, 100, 100)),
+        ]);
+
+        assert_eq!(
+            stack_set
+                .swap_in_direction(Direction::Left, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
+            Some(1)
+        );
+        assert_eq!(stack_set.current_client(), Some(&4));
+        assert_eq!(clients(&stack_set), vec![4, 2, 3, 1]);
+    }
+
+    #[test]
     fn swaps_with_a_client_before_focus_and_preserves_intervening_positions() {
         let mut stack_set = stack_set(&[1, 2, 3, 4], 3);
         let geometry = HashMap::from([
@@ -411,9 +648,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            stack_set.swap_in_direction(Direction::Left, None, |client| {
-                geometry.get(client).copied()
-            }),
+            stack_set
+                .swap_in_direction(Direction::Left, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
             Some(1)
         );
         assert_eq!(stack_set.current_client(), Some(&3));
@@ -454,9 +693,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            stack_set.swap_in_direction(Direction::Right, None, |client| {
-                geometry.get(client).copied()
-            }),
+            stack_set
+                .swap_in_direction(Direction::Right, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
             Some(2)
         );
         assert_eq!(stack_set.current_client(), Some(&1));
@@ -480,9 +721,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            stack_set.swap_in_direction(Direction::Left, None, |client| {
-                geometry.get(client).copied()
-            }),
+            stack_set
+                .swap_in_direction(Direction::Left, None, |client| {
+                    geometry.get(client).copied()
+                })
+                .expect("swap clients"),
             Some(1)
         );
         assert_eq!(stack_set.current_client(), Some(&2));
