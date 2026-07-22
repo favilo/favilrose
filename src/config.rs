@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use color_eyre::eyre::{eyre, Context, Report, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use derive_more::{AsRef, Debug};
 use notify::{
     event::ModifyKind, recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
@@ -225,13 +225,15 @@ impl PenroseConfig {
         self.programs
             .get(&program)
             .cloned()
-            .ok_or_else(|| eyre!("program is missing from configuration: {program:?}"))
+            .ok_or_else(|| anyhow!("program is missing from configuration: {program:?}"))
     }
 
     fn validate(&self) -> Result<()> {
         if let Some(program) = Program::iter().find(|program| !self.programs.contains_key(program))
         {
-            return Err(eyre!("program is missing from configuration: {program:?}"));
+            return Err(anyhow!(
+                "program is missing from configuration: {program:?}"
+            ));
         }
 
         Ok(())
@@ -252,7 +254,7 @@ fn program(program: Program, command: &str) -> (Program, Command) {
 ///
 /// Returns an error when `HOME` is not set.
 pub fn config_path() -> Result<PathBuf> {
-    let home = env::var_os("HOME").ok_or_else(|| eyre!("HOME is not set"))?;
+    let home = env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
     Ok(PathBuf::from(home)
         .join(".config/favilrose")
         .join(CONFIG_FILE))
@@ -270,8 +272,8 @@ pub fn ensure_config_file(path: &Path) -> Result<()> {
 
     let parent = path
         .parent()
-        .ok_or_else(|| eyre!("config path has no parent"))?;
-    fs::create_dir_all(parent).wrap_err("create configuration directory")?;
+        .ok_or_else(|| anyhow!("config path has no parent"))?;
+    fs::create_dir_all(parent).context("create configuration directory")?;
     let config = commented_default_config()?;
 
     match OpenOptions::new().write(true).create_new(true).open(path) {
@@ -279,10 +281,10 @@ pub fn ensure_config_file(path: &Path) -> Result<()> {
             use std::io::Write;
 
             file.write_all(config.as_bytes())
-                .wrap_err("write default configuration")?;
+                .context("write default configuration")?;
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error).wrap_err("create configuration file"),
+        Err(error) => return Err(error).context("create configuration file"),
     }
 
     Ok(())
@@ -290,7 +292,7 @@ pub fn ensure_config_file(path: &Path) -> Result<()> {
 
 fn commented_default_config() -> Result<String> {
     let config = toml::to_string_pretty(&PenroseConfig::default())
-        .wrap_err("serialize default configuration")?;
+        .context("serialize default configuration")?;
     let mut commented = String::with_capacity(config.len());
 
     for line in config.lines() {
@@ -304,10 +306,10 @@ fn commented_default_config() -> Result<String> {
 
 fn parse_config(contents: &str) -> Result<PenroseConfig> {
     let deserializer =
-        toml::de::Deserializer::parse(contents).wrap_err("parse configuration file")?;
+        toml::de::Deserializer::parse(contents).context("parse configuration file")?;
     let overrides = serde_path_to_error::deserialize(deserializer).map_err(|error| {
         let path = error.path().to_string();
-        Report::new(error.into_inner()).wrap_err(format!("parse configuration file at {path}"))
+        Error::new(error.into_inner()).context(format!("parse configuration file at {path}"))
     })?;
     let config = PenroseConfig::default().with_overrides(overrides);
     config.validate()?;
@@ -316,7 +318,7 @@ fn parse_config(contents: &str) -> Result<PenroseConfig> {
 }
 
 fn load_key_bindings(path: &Path) -> Result<KeyBindings<RustConn>> {
-    let contents = fs::read_to_string(path).wrap_err("read configuration file")?;
+    let contents = fs::read_to_string(path).context("read configuration file")?;
     let config = parse_config(&contents)?;
     let configured_bindings = config
         .keybindings
@@ -327,11 +329,11 @@ fn load_key_bindings(path: &Path) -> Result<KeyBindings<RustConn>> {
     let raw_bindings = bindings::key_bindings(&config)?;
 
     let key_codes = keycodes_from_xmodmap()?;
-    parse_keybindings(raw_bindings, &key_codes).wrap_err("parse keybindings with xmodmap")
+    parse_keybindings(raw_bindings, &key_codes).context("parse keybindings with xmodmap")
 }
 
 fn keycodes_from_xmodmap() -> Result<HashMap<String, u8>> {
-    let output = spawn_for_output_with_args("xmodmap", &["-pke"]).wrap_err("run xmodmap -pke")?;
+    let output = spawn_for_output_with_args("xmodmap", &["-pke"]).context("run xmodmap -pke")?;
 
     parse_xmodmap_keycodes(&output)
 }
@@ -342,7 +344,7 @@ fn parse_xmodmap_keycodes(output: &str) -> Result<HashMap<String, u8>> {
     for (line_number, line) in output.lines().enumerate() {
         let mut fields = line.split_whitespace();
         if fields.next() != Some("keycode") {
-            return Err(eyre!(
+            return Err(anyhow!(
                 "unexpected xmodmap output on line {}: {line}",
                 line_number + 1
             ));
@@ -350,14 +352,12 @@ fn parse_xmodmap_keycodes(output: &str) -> Result<HashMap<String, u8>> {
 
         let key_code = fields
             .next()
-            .ok_or_else(|| eyre!("missing keycode on xmodmap output line {}", line_number + 1))?
+            .ok_or_else(|| anyhow!("missing keycode on xmodmap output line {}", line_number + 1))?
             .parse::<u8>()
-            .wrap_err_with(|| {
-                format!("parse keycode on xmodmap output line {}", line_number + 1)
-            })?;
+            .with_context(|| format!("parse keycode on xmodmap output line {}", line_number + 1))?;
 
         if fields.next() != Some("=") {
-            return Err(eyre!(
+            return Err(anyhow!(
                 "missing '=' after keycode on xmodmap output line {}",
                 line_number + 1
             ));
@@ -425,14 +425,14 @@ impl ConfigWatcher {
             Ok(_) => {}
             Err(error) => tracing::error!(%error, "watch configuration file"),
         })
-        .wrap_err("create configuration watcher")?;
+        .context("create configuration watcher")?;
 
         let parent = path
             .parent()
-            .ok_or_else(|| eyre!("config path has no parent"))?;
+            .ok_or_else(|| anyhow!("config path has no parent"))?;
         watcher
             .watch(parent, RecursiveMode::NonRecursive)
-            .wrap_err("watch configuration directory")?;
+            .context("watch configuration directory")?;
 
         Ok(Self {
             _watcher: watcher,
@@ -479,7 +479,7 @@ impl ConfigWatcher {
         match load_key_bindings(&self.path) {
             Ok(key_bindings) => {
                 self.key_bindings = key_bindings;
-                if let Err(error) = self.grab_keys(x).wrap_err("grab_keys failed") {
+                if let Err(error) = self.grab_keys(x).context("grab_keys failed") {
                     tracing::error!(?error, "grab reloaded keybindings");
                     self.notify(
                         "Keybindings not reloaded",
@@ -594,24 +594,24 @@ impl StateHook<RustConn> for ConfigKeybindingStartup {
 }
 
 fn wake_window_manager() -> Result<()> {
-    let (connection, _) = RustConnection::connect(None).wrap_err("connect to X server")?;
+    let (connection, _) = RustConnection::connect(None).context("connect to X server")?;
     let root = connection
         .setup()
         .roots
         .first()
-        .ok_or_else(|| eyre!("X server did not report any screens"))?
+        .ok_or_else(|| anyhow!("X server did not report any screens"))?
         .root;
     let property = connection
         .intern_atom(false, RELOAD_PROPERTY)
-        .wrap_err("intern reload property")?
+        .context("intern reload property")?
         .reply()
-        .wrap_err("resolve reload property")?
+        .context("resolve reload property")?
         .atom;
 
     connection
         .change_property8(PropMode::REPLACE, root, property, AtomEnum::STRING, &[1])
-        .wrap_err("signal configuration reload")?;
-    connection.flush().wrap_err("flush reload signal")?;
+        .context("signal configuration reload")?;
+    connection.flush().context("flush reload signal")?;
 
     Ok(())
 }

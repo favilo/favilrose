@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use color_eyre::eyre::Result;
+use anyhow::Result;
 use penrose::{
     builtin::{
         actions::{exit, floating::sink_focused, key_handler, modify_with, send_layout_message},

@@ -15,7 +15,7 @@
 
 use std::{collections::HashMap, env, path::PathBuf};
 
-use color_eyre::eyre::{eyre, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use penrose::{
     core::{Config, WindowManager},
     extensions::hooks::{add_ewmh_hooks, SpawnOnStartup},
@@ -70,11 +70,9 @@ fn main() -> Result<()> {
 }
 
 fn setup_logging() -> Result<()> {
-    color_eyre::install()?;
-
     let config_home = match env::var_os("XDG_CONFIG_HOME") {
         Some(path) => PathBuf::from(path),
-        None => PathBuf::from(env::var_os("HOME").ok_or_else(|| eyre!("HOME is not set"))?)
+        None => PathBuf::from(env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?)
             .join(".config"),
     };
     let penrose_home = config_home.join("penrose");

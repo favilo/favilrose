@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use color_eyre::eyre::{ensure, eyre, Result};
+use anyhow::{anyhow, ensure, Result};
 use penrose::{
     core::{hooks::ManageHook, State},
     extensions::hooks::manage::{DefaultTiled, FloatingFixed, FloatingRelative},
@@ -373,7 +373,7 @@ impl NotificationUserSuggested {
 
 fn centered_in_screen(rect: Rect, screen: Rect) -> Result<Rect> {
     rect.centered_in(&screen)
-        .ok_or_else(|| eyre!("window rectangle does not fit within the current screen"))
+        .ok_or_else(|| anyhow!("window rectangle does not fit within the current screen"))
 }
 
 impl Default for NotificationUserSuggested {

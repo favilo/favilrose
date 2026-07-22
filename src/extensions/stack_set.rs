@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use color_eyre::eyre::{eyre, Result};
+use anyhow::{anyhow, Result};
 use derive_more::Debug;
 use penrose::pure::{geometry::Rect, Position, Stack, StackSet};
 use serde::{Deserialize, Serialize};
@@ -120,8 +120,8 @@ where
         let focused = self
             .current_client()
             .cloned()
-            .ok_or_else(|| eyre!("directional swap has no focused client"))?;
-        let mut outcome = Err(eyre!("directional swap has no occupied stack"));
+            .ok_or_else(|| anyhow!("directional swap has no focused client"))?;
+        let mut outcome = Err(anyhow!("directional swap has no occupied stack"));
 
         self.modify_occupied(|stack| {
             let original = stack.clone();
@@ -218,13 +218,13 @@ where
     let focused_index = stack
         .iter()
         .position(|client| client == focused)
-        .ok_or_else(|| eyre!("focused client is not in the current stack"))?;
+        .ok_or_else(|| anyhow!("focused client is not in the current stack"))?;
     let neighbor_index = stack
         .iter()
         .position(|client| client == neighbor)
-        .ok_or_else(|| eyre!("selected neighbor is not in the current stack"))?;
+        .ok_or_else(|| anyhow!("selected neighbor is not in the current stack"))?;
     let (focused, remainder) = stack.remove_focused();
-    let mut remainder = remainder.ok_or_else(|| eyre!("directional swap requires a neighbor"))?;
+    let mut remainder = remainder.ok_or_else(|| anyhow!("directional swap requires a neighbor"))?;
 
     if remainder.len() == 1 {
         let position = if focused_index < neighbor_index {
@@ -238,8 +238,8 @@ where
     }
 
     let (neighbor, remainder) = remainder.remove(neighbor);
-    let neighbor = neighbor.ok_or_else(|| eyre!("selected neighbor could not be removed"))?;
-    let mut remainder = remainder.ok_or_else(|| eyre!("directional swap leaves no clients"))?;
+    let neighbor = neighbor.ok_or_else(|| anyhow!("selected neighbor could not be removed"))?;
+    let mut remainder = remainder.ok_or_else(|| anyhow!("directional swap leaves no clients"))?;
 
     match focused_index.cmp(&neighbor_index) {
         Ordering::Less => {
@@ -250,7 +250,7 @@ where
             insert_at_index(&mut remainder, neighbor_index, focused.clone())?;
             insert_at_index(&mut remainder, focused_index, neighbor)?;
         }
-        Ordering::Equal => return Err(eyre!("directional neighbor is the focused client")),
+        Ordering::Equal => return Err(anyhow!("directional neighbor is the focused client")),
     }
 
     remainder.focus_element(&focused);
@@ -270,7 +270,7 @@ where
         .iter()
         .nth(index)
         .cloned()
-        .ok_or_else(|| eyre!("insertion index is outside the stack"))?;
+        .ok_or_else(|| anyhow!("insertion index is outside the stack"))?;
     stack.focus_element(&anchor);
     stack.insert_at(Position::Before, client);
 
