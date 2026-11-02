@@ -6,11 +6,13 @@ use penrose::{
         actions::{exit, floating::sink_focused, key_handler, modify_with, send_layout_message},
         layout::messages::{ExpandMain, IncMain, ShrinkMain},
     },
-    core::{bindings::KeyEventHandler, State},
+    core::{
+        bindings::KeyEventHandler,
+        conn::{Conn, ConnExt},
+        State,
+    },
     pure::StackSet,
     util,
-    x::{XConn, XConnExt},
-    x11rb::RustConn,
 };
 
 use crate::{
@@ -19,6 +21,7 @@ use crate::{
         directional_navigation_history::DirectionalNavigationHistory,
         stack_set::{Direction, StackSetExt},
     },
+    WmConn,
 };
 
 /// Build handlers for all configured keybindings.
@@ -28,7 +31,7 @@ use crate::{
 /// Returns an error if a configured handler cannot be constructed.
 pub fn key_bindings(
     config: &PenroseConfig,
-) -> Result<HashMap<String, Box<dyn KeyEventHandler<RustConn>>>> {
+) -> Result<HashMap<String, Box<dyn KeyEventHandler<WmConn>>>> {
     config
         .keybindings
         .iter()
@@ -39,7 +42,7 @@ pub fn key_bindings(
 fn action_handler(
     action: Action,
     config: &PenroseConfig,
-) -> Result<Box<dyn KeyEventHandler<RustConn>>> {
+) -> Result<Box<dyn KeyEventHandler<WmConn>>> {
     Ok(match action {
         Action::FocusDown => modify_with(StackSet::focus_down),
         Action::FocusUp => modify_with(StackSet::focus_up),
@@ -72,9 +75,9 @@ fn action_handler(
         Action::Screenshot => spawn_program(config.command(Program::Screenshot)?),
         Action::FocusTag(tag) => focus_tag_handler(tag),
         Action::MoveFocusTo(tag) => {
-            key_handler(move |state: &mut State<RustConn>, x: &RustConn| {
+            key_handler(move |state: &mut State<WmConn>, conn: &mut WmConn| {
                 state.client_set.move_focused_to_tag(tag.to_string());
-                x.refresh(state)
+                conn.refresh(state)
             })
         }
         Action::FocusDirection(direction) => focus_direction_handler(direction),
@@ -82,7 +85,7 @@ fn action_handler(
     })
 }
 
-fn lock_and_suspend_handler(config: &PenroseConfig) -> Result<Box<dyn KeyEventHandler<RustConn>>> {
+fn lock_and_suspend_handler(config: &PenroseConfig) -> Result<Box<dyn KeyEventHandler<WmConn>>> {
     let lock = config.command(Program::Lock)?;
     let suspend = config.command(Program::Suspend)?;
 
@@ -93,22 +96,22 @@ fn lock_and_suspend_handler(config: &PenroseConfig) -> Result<Box<dyn KeyEventHa
     }))
 }
 
-fn spawn_program(command: Command) -> Box<dyn KeyEventHandler<RustConn>> {
+fn spawn_program(command: Command) -> Box<dyn KeyEventHandler<WmConn>> {
     key_handler(move |_, _| util::spawn(command.as_ref().clone()))
 }
 
-fn focus_tag_handler(tag: u8) -> Box<dyn KeyEventHandler<RustConn>> {
-    key_handler(move |state: &mut State<RustConn>, x: &RustConn| {
+fn focus_tag_handler(tag: u8) -> Box<dyn KeyEventHandler<WmConn>> {
+    key_handler(move |state: &mut State<WmConn>, conn: &mut WmConn| {
         state.client_set.pull_tag_to_screen(tag.to_string());
-        x.refresh(state)
+        conn.refresh(state)
     })
 }
 
-fn focus_direction_handler<X>(direction: Direction) -> Box<dyn KeyEventHandler<X>>
+fn focus_direction_handler<C>(direction: Direction) -> Box<dyn KeyEventHandler<C>>
 where
-    X: XConn + 'static,
+    C: Conn + 'static,
 {
-    key_handler(move |state: &mut State<X>, x: &X| {
+    key_handler(move |state: &mut State<C>, conn: &mut C| {
         let origin = state.client_set.current_client().copied();
         let preferred = origin.and_then(|focused| {
             let history = state.extension_or_default::<DirectionalNavigationHistory>();
@@ -119,7 +122,7 @@ where
             state
                 .client_set
                 .focus_in_direction(direction, preferred.as_ref(), |client| {
-                    x.client_geometry(*client)
+                    conn.client_geometry(*client)
                         .inspect_err(|error| {
                             tracing::debug!(?error, ?client, "read client geometry");
                         })
@@ -131,29 +134,29 @@ where
             history
                 .borrow_mut()
                 .record(&state.client_set, origin, destination);
-            x.refresh(state)?;
+            conn.refresh(state)?;
         }
 
         Ok(())
     })
 }
 
-fn move_direction_handler<X>(direction: Direction) -> Box<dyn KeyEventHandler<X>>
+fn move_direction_handler<C>(direction: Direction) -> Box<dyn KeyEventHandler<C>>
 where
-    X: XConn + 'static,
+    C: Conn + 'static,
 {
-    key_handler(move |state: &mut State<X>, x: &X| {
+    key_handler(move |state: &mut State<C>, conn: &mut C| {
         let moved = state
             .client_set
             .swap_in_direction(direction, None, |client| {
-                x.client_geometry(*client)
+                conn.client_geometry(*client)
                     .inspect_err(|error| tracing::debug!(?error, ?client, "read client geometry"))
                     .ok()
             })
             .map_err(|error| penrose::Error::Custom(format!("{error:#}")))?;
 
         if moved.is_some() {
-            x.refresh(state)?;
+            conn.refresh(state)?;
         }
 
         Ok(())

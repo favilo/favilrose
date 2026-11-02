@@ -44,5 +44,20 @@ They rank candidates by perpendicular overlap, gap, and midpoint alignment.
 Their shifted variants swap the focused window with the selected window while
 preserving focus.
 
+## macOS Setup (`penrosx`)
+
+On macOS, `favilrose` uses [`penrosx`](https://github.com/sminez/penrosx) (`OsxConn`).
+
+1. Build and install:
+   ```sh
+   make && sudo make install
+   ```
+   This installs `/usr/local/bin/favilo-penrose`, copies `services/launchd/com.favilo.penrose.plist` into `~/Library/LaunchAgents/`, and configures macOS Mission Control (`mru-spaces = false`, `spans-displays = false`).
+2. Grant Accessibility permissions to `/usr/local/bin/favilo-penrose` (or your terminal if running manually) in **System Settings → Privacy & Security → Accessibility**.
+3. Start the LaunchAgent:
+   ```sh
+   launchctl load ~/Library/LaunchAgents/com.favilo.penrose.plist
+   ```
+
 Screenshot from the main penrose repo:
 ![screenshot](https://raw.githubusercontent.com/sminez/penrose/develop/screenshot.png)

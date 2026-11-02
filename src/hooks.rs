@@ -2,21 +2,147 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, ensure, Result};
 use penrose::{
-    core::{hooks::ManageHook, State},
-    extensions::hooks::manage::{DefaultTiled, FloatingFixed, FloatingRelative},
+    core::{
+        conn::{Conn, Query},
+        hooks::ManageHook,
+        State,
+    },
+    extensions::hooks::manage::{DefaultTiled, FloatingRelative},
     manage_hooks,
     pure::geometry::{Rect, RelativeRect},
-    x::{
-        property::WmNormalHints,
-        query::{ClassName, StringProperty, Title},
-        Atom, Prop, Query, XConn,
-    },
-    x11rb::RustConn,
+    x::{property::WmNormalHints, Atom, Prop, XConn},
+    WinId,
 };
-use x11rb::protocol::xproto::{ConnectionExt, Gravity};
-use x11rb_protocol::protocol::xproto::AtomEnum;
 
+#[cfg(not(target_os = "macos"))]
 use crate::BAR_HEIGHT_PX;
+use crate::WmConn;
+
+#[cfg(not(target_os = "macos"))]
+mod x11 {
+    use penrose::{
+        core::conn::Query,
+        x::{Atom, Prop, XConn},
+        x11rb::RustConn,
+        WinId,
+    };
+    use x11rb::protocol::xproto::{ConnectionExt, Gravity};
+    use x11rb_protocol::protocol::xproto::AtomEnum;
+
+    use super::WmNormalHintsExt;
+
+    pub struct ConstrainedSizeHints;
+
+    impl<X: XConn> Query<X> for ConstrainedSizeHints {
+        fn run(&self, id: WinId, x: &mut X) -> penrose::Result<bool> {
+            let p = Atom::WmNormalHints.as_ref();
+            let Ok(Some(Prop::WmNormalHints(hints))) = x.get_prop(id, p) else {
+                return Ok(false);
+            };
+
+            let Some(min) = hints.min() else {
+                return Ok(false);
+            };
+            let Some(max) = hints.max() else {
+                return Ok(false);
+            };
+
+            Ok(min.w == max.w && min.h == max.h)
+        }
+    }
+
+    pub struct SubstringProperty(pub &'static str, pub &'static str);
+
+    impl SubstringProperty {
+        pub fn builder(prop: &'static str) -> impl Fn(&'static str) -> Self {
+            move |s: &'static str| SubstringProperty(prop, s)
+        }
+    }
+
+    impl<X: XConn> Query<X> for SubstringProperty {
+        fn run(&self, id: WinId, x: &mut X) -> penrose::Result<bool> {
+            match x.get_prop(id, self.0)? {
+                Some(Prop::UTF8String(strs)) => {
+                    Ok(strs.first().is_some_and(|value| value.contains(self.1)))
+                }
+                _ => Ok(false),
+            }
+        }
+    }
+
+    pub struct StaticSizeHints;
+
+    impl StaticSizeHints {
+        fn gravity_is_static(id: WinId, x: &mut RustConn) -> penrose::Result<bool> {
+            let atom = Atom::WmNormalHints.as_ref();
+            let atom_xid = x.intern_atom(atom)?;
+
+            let r = x
+                .connection()
+                .get_property(false, *id, atom_xid, AtomEnum::WM_SIZE_HINTS, 0, 1024)?
+                .reply()?;
+
+            let prop_type = match r.type_ {
+                0 => return Ok(false),
+                id => x.atom_name(WinId::from(id))?,
+            };
+
+            let raw = match prop_type.as_ref() {
+                "WM_SIZE_HINTS" => r
+                    .value32()
+                    .ok_or_else(|| penrose::Error::InvalidPropertyData {
+                        id,
+                        prop: atom.to_owned(),
+                        ty: prop_type.clone(),
+                    })?
+                    .collect::<Vec<_>>(),
+                _ => {
+                    return Err(penrose::Error::InvalidHints {
+                        reason: format!("expected WM_SIZE_HINTS but got {prop_type}"),
+                    })
+                }
+            };
+
+            if raw.len() != 18 {
+                return Err(penrose::Error::InvalidHints {
+                    reason: format!("raw bytes should be [u32; 18] but got [u32; {}]", raw.len()),
+                });
+            }
+
+            let gravity = raw
+                .get(17)
+                .copied()
+                .map(Gravity::from)
+                .ok_or_else(|| penrose::Error::Custom("missing window gravity hint".to_owned()))?;
+            tracing::trace!(?gravity, "gravity");
+
+            Ok(gravity == Gravity::STATIC)
+        }
+    }
+
+    impl Query<RustConn> for StaticSizeHints {
+        fn run(&self, id: WinId, x: &mut RustConn) -> penrose::Result<bool> {
+            tracing::trace!(%id, "checking if gravity is static");
+            if !Self::gravity_is_static(id, x)? {
+                return Ok(false);
+            }
+
+            let p = Atom::WmNormalHints.as_ref();
+            let Ok(Some(Prop::WmNormalHints(hints))) = x.get_prop(id, p) else {
+                return Ok(false);
+            };
+
+            tracing::trace!(?hints, "gravity is static");
+
+            let Some(spec) = hints.user_specified() else {
+                return Ok(false);
+            };
+            tracing::trace!(?spec, "user_specified");
+
+            Ok(spec.w > 0 && spec.h > 0)
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct OneOfQuery<C, Q, X> {
@@ -37,9 +163,9 @@ impl<C, Q, X> Clone for OneOfQuery<C, Q, X> {
 
 impl<C, Q, X> OneOfQuery<C, Q, X>
 where
-    X: XConn,
+    X: Conn,
     Q: Query<X>,
-    C: Fn(&'static str) -> Q,
+    C: Fn(&'static str) -> Q + Send + Sync,
 {
     pub fn new(strs: &[&'static str], constr: C) -> Self {
         Self {
@@ -52,13 +178,13 @@ where
 
 impl<C, Q, X> Query<X> for OneOfQuery<C, Q, X>
 where
-    X: XConn,
+    X: Conn,
     Q: Query<X>,
-    C: Fn(&'static str) -> Q,
+    C: Fn(&'static str) -> Q + Send + Sync,
 {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+    fn run(&self, id: WinId, conn: &mut X) -> penrose::Result<bool> {
         self.strs.iter().try_fold(false, |acc, title| {
-            Ok(acc || (self.constr)(title).run(id, x)?)
+            Ok(acc || (self.constr)(title).run(id, conn)?)
         })
     }
 }
@@ -139,122 +265,17 @@ fn get_rect_from_value(value: &serde_json::Value) -> Option<Rect> {
     ))
 }
 
-struct ConstrainedSizeHints;
+#[cfg(not(target_os = "macos"))]
+pub fn manage_hook<'a>() -> Box<dyn ManageHook<WmConn> + 'a> {
+    use penrose::{
+        extensions::hooks::manage::FloatingFixed,
+        x::query::{ClassName, StringProperty, Title},
+    };
+    use x11::{ConstrainedSizeHints, StaticSizeHints, SubstringProperty};
 
-impl<X: XConn> Query<X> for ConstrainedSizeHints {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        let p = Atom::WmNormalHints.as_ref();
-        let Ok(Some(Prop::WmNormalHints(hints))) = x.get_prop(id, p) else {
-            return Ok(false);
-        };
-
-        let Some(min) = hints.min() else {
-            return Ok(false);
-        };
-        let Some(max) = hints.max() else {
-            return Ok(false);
-        };
-
-        Ok(min.w == max.w && min.h == max.h)
-    }
-}
-
-struct StaticSizeHints;
-
-impl StaticSizeHints {
-    fn gravity_is_static(id: penrose::Xid, x: &RustConn) -> penrose::Result<bool> {
-        let atom = Atom::WmNormalHints.as_ref();
-        let atom_xid = x.intern_atom(atom)?;
-
-        let r = x
-            .connection()
-            .get_property(false, *id, atom_xid, AtomEnum::WM_SIZE_HINTS, 0, 1024)?
-            .reply()?;
-
-        let prop_type = match r.type_ {
-            0 => return Ok(false),
-            id => x.atom_name(penrose::Xid::from(id))?,
-        };
-
-        let raw = match prop_type.as_ref() {
-            "WM_SIZE_HINTS" => r
-                .value32()
-                .ok_or_else(|| penrose::Error::InvalidPropertyData {
-                    id,
-                    prop: atom.to_owned(),
-                    ty: prop_type.clone(),
-                })?
-                .collect::<Vec<_>>(),
-            _ => {
-                return Err(penrose::Error::InvalidHints {
-                    reason: format!("expected WM_SIZE_HINTS but got {prop_type}"),
-                })
-            }
-        };
-
-        if raw.len() != 18 {
-            return Err(penrose::Error::InvalidHints {
-                reason: format!("raw bytes should be [u32; 18] but got [u32; {}]", raw.len()),
-            });
-        }
-
-        let gravity = raw
-            .get(17)
-            .copied()
-            .map(Gravity::from)
-            .ok_or_else(|| penrose::Error::Custom("missing window gravity hint".to_owned()))?;
-        tracing::trace!(?gravity, "gravity");
-
-        Ok(gravity == Gravity::STATIC)
-    }
-}
-
-impl Query<RustConn> for StaticSizeHints {
-    fn run(&self, id: penrose::Xid, x: &RustConn) -> penrose::Result<bool> {
-        tracing::trace!(%id, "checking if gravity is static");
-        if !Self::gravity_is_static(id, x)? {
-            return Ok(false);
-        }
-
-        let p = Atom::WmNormalHints.as_ref();
-        let Ok(Some(Prop::WmNormalHints(hints))) = x.get_prop(id, p) else {
-            return Ok(false);
-        };
-
-        tracing::trace!(?hints, "gravity is static");
-
-        let Some(spec) = hints.user_specified() else {
-            return Ok(false);
-        };
-        tracing::trace!(?spec, "user_specified");
-
-        Ok(spec.w > 0 && spec.h > 0)
-    }
-}
-
-struct SubstringProperty(pub &'static str, pub &'static str);
-
-impl SubstringProperty {
-    pub fn builder(prop: &'static str) -> impl Fn(&'static str) -> Self {
-        move |s: &'static str| SubstringProperty(prop, s)
-    }
-}
-
-impl<X: XConn> Query<X> for SubstringProperty {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
-        match x.get_prop(id, self.0)? {
-            Some(Prop::UTF8String(strs)) => {
-                Ok(strs.first().is_some_and(|value| value.contains(self.1)))
-            }
-            _ => Ok(false),
-        }
-    }
-}
-
-pub fn manage_hook<'a>() -> Box<dyn ManageHook<RustConn> + 'a> {
     let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
     let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);
-    let _zoom_substrings: OneOfQuery<_, _, RustConn> = OneOfQuery::new(
+    let _zoom_substrings: OneOfQuery<_, _, WmConn> = OneOfQuery::new(
         &["Zoom", "Meeting", "Settings", "Chat"],
         SubstringProperty::builder(Atom::NetWmName.as_ref()),
     );
@@ -278,10 +299,29 @@ pub fn manage_hook<'a>() -> Box<dyn ManageHook<RustConn> + 'a> {
     manage_hook
 }
 
+#[cfg(target_os = "macos")]
+pub fn manage_hook<'a>() -> Box<dyn ManageHook<WmConn> + 'a> {
+    use penrose::extensions::hooks::manage::FloatingCentered;
+    use penrosx::query::{AppName, Title};
+
+    let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
+    let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);
+    let manage_hook = manage_hooks! {
+        AppName("zoom.us").and(zoom_titles.clone()) => DefaultTiled,
+        AppName("zoom.us").and(zoom_titles.not()) => FloatingRelative(top_right_corner),
+        AppName("Obsidian").and(
+            OneOfQuery::new(&["Obsidian Help"], Title))
+                 => FloatingCentered::new(0.25, 0.25),
+    };
+    manage_hook
+}
+
 pub struct IsDock;
 
 impl<X: XConn> Query<X> for IsDock {
-    fn run(&self, id: penrose::Xid, x: &X) -> penrose::Result<bool> {
+    fn run(&self, id: WinId, x: &mut X) -> penrose::Result<bool> {
+        use penrose::x::query::StringProperty;
+
         let window_type = Atom::NetWmWindowType.as_ref();
 
         Ok(
@@ -293,8 +333,8 @@ impl<X: XConn> Query<X> for IsDock {
 
 pub struct IgnoreWindow;
 
-impl<X: XConn> ManageHook<X> for IgnoreWindow {
-    fn call(&mut self, client: penrose::Xid, state: &mut State<X>, _: &X) -> penrose::Result<()> {
+impl<C: Conn> ManageHook<C> for IgnoreWindow {
+    fn call(&mut self, client: WinId, state: &mut State<C>, _: &mut C) -> penrose::Result<()> {
         state.client_set.remove_client(&client);
         Ok(())
     }
@@ -330,7 +370,7 @@ impl Default for FloatingSuggestedCentered {
 }
 
 impl<X: XConn> ManageHook<X> for FloatingSuggestedCentered {
-    fn call(&mut self, client: penrose::Xid, state: &mut State<X>, x: &X) -> penrose::Result<()> {
+    fn call(&mut self, client: WinId, state: &mut State<X>, x: &mut X) -> penrose::Result<()> {
         let p = Atom::WmNormalHints.as_ref();
         let Ok(Some(Prop::WmNormalHints(hints))) = x.get_prop(client, p) else {
             return Ok(());
@@ -386,7 +426,7 @@ impl Default for NotificationUserSuggested {
 }
 
 impl<X: XConn> ManageHook<X> for NotificationUserSuggested {
-    fn call(&mut self, client: penrose::Xid, state: &mut State<X>, x: &X) -> penrose::Result<()> {
+    fn call(&mut self, client: WinId, state: &mut State<X>, x: &mut X) -> penrose::Result<()> {
         const PADDING: f64 = 0.025;
 
         let p = Atom::WmNormalHints.as_ref();

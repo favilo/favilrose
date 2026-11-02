@@ -1,3 +1,5 @@
+UNAME_S := $(shell uname -s)
+
 all: build
 
 .PHONY: build
@@ -15,6 +17,24 @@ build-debug:
 
 .PHONY: install-helpers
 install-helpers:
+ifeq ($(UNAME_S),Darwin)
+	@echo ":: Installing LaunchAgent..."
+	@USER_HOME=$$(eval echo ~$${SUDO_USER:-$$USER}); \
+	mkdir -p "$$USER_HOME/Library/LaunchAgents"; \
+	cp -f services/launchd/com.favilo.penrose.plist "$$USER_HOME/Library/LaunchAgents/"; \
+	if [ -n "$$SUDO_USER" ]; then chown "$$SUDO_USER" "$$USER_HOME/Library/LaunchAgents/com.favilo.penrose.plist"; fi
+	@echo ":: Configuring macOS Spaces settings..."
+	@if [ -n "$$SUDO_USER" ]; then \
+		sudo -u "$$SUDO_USER" defaults write com.apple.dock mru-spaces -bool false; \
+		sudo -u "$$SUDO_USER" defaults write com.apple.spaces spans-displays -bool false; \
+	else \
+		defaults write com.apple.dock mru-spaces -bool false; \
+		defaults write com.apple.spaces spans-displays -bool false; \
+	fi
+	@echo ":: Remember to grant Accessibility permission to /usr/local/bin/favilo-penrose"
+	@echo ":: in System Settings -> Privacy & Security -> Accessibility"
+	@echo ":: Run 'launchctl load ~/Library/LaunchAgents/com.favilo.penrose.plist' to start the service"
+else
 	@echo ":: Installing ./bin..."
 	@mkdir -p /usr/local/bin
 	@cp -R bin/. /usr/local/bin
@@ -22,8 +42,8 @@ install-helpers:
 	@echo ":: Installing ./scripts..."
 	@cp -r scripts /usr/local
 	@echo ":: Installing .service files"
-	@cp -r systemd/user/* /usr/lib/systemd/user/
-	@cp -r systemd/system/* /usr/lib/systemd/system/
+	@cp -r services/systemd/user/* /usr/lib/systemd/user/
+	@cp -r services/systemd/system/* /usr/lib/systemd/system/
 	@ls scripts | xargs -I {} chmod 755 /usr/local/scripts/{}
 	@echo ":: Copying over xsession file..."
 	@cp penrose.desktop /usr/share/xsessions/
@@ -31,6 +51,7 @@ install-helpers:
 	@echo ":: Remember to run 'systemctl --user daemon-reload'"
 	@echo "::             and 'sudo systemctl daemon-reload'"
 	@echo ":: in order to reload the systemd services"
+endif
 
 .PHONY: install-penrose-release
 install-penrose-release:
@@ -38,6 +59,9 @@ install-penrose-release:
 	@mkdir -p /usr/local/bin
 	@cp -f target/release/favilo-penrose /usr/local/bin
 	@chmod 755 /usr/local/bin/favilo-penrose
+ifeq ($(UNAME_S),Darwin)
+	@codesign --force --sign - /usr/local/bin/favilo-penrose
+endif
 
 .PHONY: install-penrose-debug
 install-penrose-debug:
@@ -46,6 +70,9 @@ install-penrose-debug:
 	@mkdir -p /usr/local/bin
 	@cp -f target/debug/favilo-penrose /usr/local/bin
 	@chmod 755 /usr/local/bin/favilo-penrose
+ifeq ($(UNAME_S),Darwin)
+	@codesign --force --sign - /usr/local/bin/favilo-penrose
+endif
 
 .PHONY: install
 install: install-penrose-release install-helpers
@@ -58,10 +85,15 @@ install-debug: install-penrose-debug install-helpers
 .PHONY: uninstall
 uninstall:
 	@echo ":: Removing binaries..."
-	@ls bin | xargs -I {} rm -f /usr/local/bin/{}
 	@rm -f /usr/local/bin/favilo-penrose
+ifeq ($(UNAME_S),Darwin)
+	@USER_HOME=$$(eval echo ~$${SUDO_USER:-$$USER}); \
+	rm -f "$$USER_HOME/Library/LaunchAgents/com.favilo.penrose.plist"
+else
+	@ls bin | xargs -I {} rm -f /usr/local/bin/{}
 	@echo ":: Removing scripts..."
 	@ls scripts | xargs -I {} rm -f /usr/local/scripts/{}
+endif
 	@echo ":: Done"
 
 .PHONY: update-penrose

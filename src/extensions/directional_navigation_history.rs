@@ -1,28 +1,27 @@
 use std::collections::{HashMap, HashSet};
 
 use penrose::{
-    core::{hooks::StateHook, State, Xid},
+    core::{conn::Conn, hooks::StateHook, State, WinId},
     pure::StackSet,
-    x::XConn,
 };
 
 #[derive(Default)]
 pub struct DirectionalNavigationHistory {
-    origins_by_destination: HashMap<Xid, Xid>,
+    origins_by_destination: HashMap<WinId, WinId>,
     active_workspace_tag: Option<String>,
 }
 
 impl DirectionalNavigationHistory {
     pub fn preferred_origin(
         &mut self,
-        client_set: &StackSet<Xid>,
-        destination: Xid,
-    ) -> Option<Xid> {
+        client_set: &StackSet<WinId>,
+        destination: WinId,
+    ) -> Option<WinId> {
         self.synchronize(client_set);
         self.origins_by_destination.get(&destination).copied()
     }
 
-    pub fn record(&mut self, client_set: &StackSet<Xid>, origin: Xid, destination: Xid) {
+    pub fn record(&mut self, client_set: &StackSet<WinId>, origin: WinId, destination: WinId) {
         self.synchronize(client_set);
 
         let current_workspace = client_set.current_workspace();
@@ -36,7 +35,7 @@ impl DirectionalNavigationHistory {
         }
     }
 
-    pub fn synchronize(&mut self, client_set: &StackSet<Xid>) {
+    pub fn synchronize(&mut self, client_set: &StackSet<WinId>) {
         let active_workspace_tag = client_set.current_tag();
 
         if self.active_workspace_tag.as_deref() != Some(active_workspace_tag) {
@@ -57,11 +56,11 @@ impl DirectionalNavigationHistory {
 
 pub struct DirectionalNavigationHistoryHook;
 
-impl<X> StateHook<X> for DirectionalNavigationHistoryHook
+impl<C> StateHook<C> for DirectionalNavigationHistoryHook
 where
-    X: XConn,
+    C: Conn,
 {
-    fn call(&mut self, state: &mut State<X>, _x: &X) -> penrose::Result<()> {
+    fn call(&mut self, state: &mut State<C>, _conn: &mut C) -> penrose::Result<()> {
         let history = state.extension_or_default::<DirectionalNavigationHistory>();
         history.borrow_mut().synchronize(&state.client_set);
 
@@ -82,11 +81,11 @@ mod tests {
 
     use super::*;
 
-    fn xid(id: u32) -> Xid {
+    fn xid(id: u32) -> WinId {
         id.into()
     }
 
-    fn stack_set() -> StackSet<Xid> {
+    fn stack_set() -> StackSet<WinId> {
         let mut client_set = StackSet::try_new(
             LayoutStack::default(),
             ["one", "two"],

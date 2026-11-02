@@ -1,11 +1,9 @@
 use std::{
-    collections::{BTreeMap, HashMap},
-    convert::TryFrom,
+    collections::BTreeMap,
     env,
     fs::{self, OpenOptions},
     io::ErrorKind,
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
     sync::mpsc::{channel, Receiver, Sender},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -17,32 +15,13 @@ use notify::{
     event::ModifyKind, recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
     Watcher,
 };
-use penrose::{
-    core::{
-        bindings::{KeyBindings, KeyCode, KeyEventHandler, ModifierKey},
-        hooks::{EventHook, StateHook},
-        State,
-    },
-    util::spawn_for_output_with_args,
-    x::{XConn, XEvent},
-    x11rb::RustConn,
-};
+use penrose::core::{bindings::KeyBindings, State};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
-use x11rb::{
-    connection::Connection,
-    protocol::xproto::{
-        AtomEnum, ConnectionExt as XprotoConnectionExt, GrabMode, ModMask, PropMode,
-    },
-    rust_connection::RustConnection,
-    wrapper::ConnectionExt as _,
-};
 
-use crate::bindings;
-use crate::extensions::stack_set::Direction;
+use crate::{bindings, extensions::stack_set::Direction, WmConn};
 
 const CONFIG_FILE: &str = "config.toml";
-const RELOAD_PROPERTY: &[u8] = b"_FAVILROSE_CONFIG_RELOAD";
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(250);
 const NOTIFICATION_DEBOUNCE: Duration = Duration::from_secs(1);
 
@@ -317,7 +296,12 @@ fn parse_config(contents: &str) -> Result<PenroseConfig> {
     Ok(config)
 }
 
-fn load_key_bindings(path: &Path) -> Result<KeyBindings<RustConn>> {
+/// Load keybindings from the configuration file at `path`.
+///
+/// # Errors
+///
+/// Returns an error if the configuration file cannot be read or parsed, or if keybindings are invalid.
+pub fn load_key_bindings(path: &Path) -> Result<KeyBindings<WmConn>> {
     let contents = fs::read_to_string(path).context("read configuration file")?;
     let config = parse_config(&contents)?;
     let configured_bindings = config
@@ -328,80 +312,288 @@ fn load_key_bindings(path: &Path) -> Result<KeyBindings<RustConn>> {
     tracing::debug!("Keybindings: {configured_bindings:#?}");
     let raw_bindings = bindings::key_bindings(&config)?;
 
-    let key_codes = keycodes_from_xmodmap()?;
-    parse_keybindings(raw_bindings, &key_codes).context("parse keybindings with xmodmap")
+    platform::parse_raw_keybindings(raw_bindings)
 }
 
-fn keycodes_from_xmodmap() -> Result<HashMap<String, u8>> {
-    let output = spawn_for_output_with_args("xmodmap", &["-pke"]).context("run xmodmap -pke")?;
+#[cfg(not(target_os = "macos"))]
+mod platform {
+    use std::{collections::HashMap, convert::TryFrom, process::Command as ProcessCommand};
 
-    parse_xmodmap_keycodes(&output)
-}
+    use anyhow::{anyhow, Context, Result};
+    use penrose::{
+        core::{
+            bindings::{KeyBindings, KeyCode, KeyEventHandler, ModifierKey},
+            hooks::{EventHook, StateHook},
+            State,
+        },
+        util::spawn_for_output_with_args,
+        x::{XConn, XEvent},
+        x11rb::RustConn,
+    };
+    use x11rb::{
+        connection::Connection,
+        protocol::xproto::{
+            AtomEnum, ConnectionExt as XprotoConnectionExt, GrabMode, ModMask, PropMode,
+        },
+        rust_connection::RustConnection,
+        wrapper::ConnectionExt as _,
+    };
 
-fn parse_xmodmap_keycodes(output: &str) -> Result<HashMap<String, u8>> {
-    let mut key_codes = HashMap::new();
+    use super::{ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher};
 
-    for (line_number, line) in output.lines().enumerate() {
-        let mut fields = line.split_whitespace();
-        if fields.next() != Some("keycode") {
-            return Err(anyhow!(
-                "unexpected xmodmap output on line {}: {line}",
-                line_number + 1
-            ));
-        }
+    const RELOAD_PROPERTY: &[u8] = b"_FAVILROSE_CONFIG_RELOAD";
 
-        let key_code = fields
-            .next()
-            .ok_or_else(|| anyhow!("missing keycode on xmodmap output line {}", line_number + 1))?
-            .parse::<u8>()
-            .with_context(|| format!("parse keycode on xmodmap output line {}", line_number + 1))?;
-
-        if fields.next() != Some("=") {
-            return Err(anyhow!(
-                "missing '=' after keycode on xmodmap output line {}",
-                line_number + 1
-            ));
-        }
-
-        key_codes.extend(fields.map(|key_name| (key_name.to_owned(), key_code)));
+    pub fn parse_raw_keybindings(
+        raw_bindings: HashMap<String, Box<dyn KeyEventHandler<RustConn>>>,
+    ) -> Result<KeyBindings<RustConn>> {
+        let key_codes = keycodes_from_xmodmap()?;
+        parse_keybindings(raw_bindings, &key_codes).context("parse keybindings with xmodmap")
     }
 
-    Ok(key_codes)
+    fn keycodes_from_xmodmap() -> Result<HashMap<String, u8>> {
+        let output = spawn_for_output_with_args("xmodmap", &["-pke"]).context("run xmodmap -pke")?;
+
+        parse_xmodmap_keycodes(&output)
+    }
+
+    pub(super) fn parse_xmodmap_keycodes(output: &str) -> Result<HashMap<String, u8>> {
+        let mut key_codes = HashMap::new();
+
+        for (line_number, line) in output.lines().enumerate() {
+            let mut fields = line.split_whitespace();
+            if fields.next() != Some("keycode") {
+                return Err(anyhow!(
+                    "unexpected xmodmap output on line {}: {line}",
+                    line_number + 1
+                ));
+            }
+
+            let key_code = fields
+                .next()
+                .ok_or_else(|| {
+                    anyhow!("missing keycode on xmodmap output line {}", line_number + 1)
+                })?
+                .parse::<u8>()
+                .with_context(|| {
+                    format!("parse keycode on xmodmap output line {}", line_number + 1)
+                })?;
+
+            if fields.next() != Some("=") {
+                return Err(anyhow!(
+                    "missing '=' after keycode on xmodmap output line {}",
+                    line_number + 1
+                ));
+            }
+
+            key_codes.extend(fields.map(|key_name| (key_name.to_owned(), key_code)));
+        }
+
+        Ok(key_codes)
+    }
+
+    fn parse_keybindings(
+        bindings: HashMap<String, Box<dyn KeyEventHandler<RustConn>>>,
+        key_codes: &HashMap<String, u8>,
+    ) -> penrose::Result<KeyBindings<RustConn>> {
+        bindings
+            .into_iter()
+            .map(|(binding, handler)| {
+                parse_keybinding(&binding, key_codes).map(|key| (key, handler))
+            })
+            .collect()
+    }
+
+    pub(super) fn parse_keybinding(
+        pattern: &str,
+        key_codes: &HashMap<String, u8>,
+    ) -> penrose::Result<KeyCode> {
+        let (modifiers, key_name) = pattern.rsplit_once('-').unwrap_or(("", pattern));
+        let code = key_codes
+            .get(key_name)
+            .ok_or_else(|| penrose::Error::UnknownKeyName {
+                name: key_name.to_owned(),
+            })?;
+        let mask = modifiers
+            .split('-')
+            .filter(|modifier| !modifier.is_empty())
+            .map(ModifierKey::try_from)
+            .try_fold(0, |mask, modifier| {
+                modifier.map(|modifier| mask | u16::from(modifier))
+            })?;
+
+        Ok(KeyCode { mask, code: *code })
+    }
+
+    pub fn grab_keys(watcher: &ConfigWatcher, x: &mut RustConn) -> penrose::Result<()> {
+        let keys = watcher.key_bindings.keys().copied().collect::<Vec<_>>();
+        let root = *x.root();
+        let connection = x.connection();
+
+        connection.ungrab_key(0, root, ModMask::ANY)?.check()?;
+
+        for modifier in [0, u16::from(ModMask::M2)] {
+            for key in &keys {
+                connection
+                    .grab_key(
+                        false,
+                        root,
+                        (key.mask | modifier).into(),
+                        key.code,
+                        GrabMode::ASYNC,
+                        GrabMode::ASYNC,
+                    )?
+                    .check()?;
+            }
+        }
+
+        connection.flush()?;
+
+        Ok(())
+    }
+
+    pub fn wake_window_manager() -> Result<()> {
+        let (connection, _) = RustConnection::connect(None).context("connect to X server")?;
+        let root = connection
+            .setup()
+            .roots
+            .first()
+            .ok_or_else(|| anyhow!("X server did not report any screens"))?
+            .root;
+        let property = connection
+            .intern_atom(false, RELOAD_PROPERTY)
+            .context("intern reload property")?
+            .reply()
+            .context("resolve reload property")?
+            .atom;
+
+        connection
+            .change_property8(PropMode::REPLACE, root, property, AtomEnum::STRING, &[1])
+            .context("signal configuration reload")?;
+        connection.flush().context("flush reload signal")?;
+
+        Ok(())
+    }
+
+    pub fn send_notification(summary: &str, body: &str) {
+        if let Err(error) = ProcessCommand::new("notify-send")
+            .args(["--app-name", "favilo-penrose", summary, body])
+            .spawn()
+        {
+            tracing::error!(%error, "send configuration notification");
+        }
+    }
+
+    impl EventHook<RustConn> for ConfigKeybindingHook {
+        fn call(
+            &mut self,
+            event: &XEvent,
+            state: &mut State<RustConn>,
+            x: &mut RustConn,
+        ) -> penrose::Result<bool> {
+            let watcher = state.extension::<ConfigWatcher>()?;
+            let mut watcher = watcher.borrow_mut();
+            watcher.reload_if_requested(x);
+
+            if let XEvent::KeyPress(key) = event {
+                watcher.handle_keypress(*key, state, x)?;
+            }
+
+            Ok(true)
+        }
+    }
+
+    impl StateHook<RustConn> for ConfigKeybindingStartup {
+        fn call(&mut self, state: &mut State<RustConn>, x: &mut RustConn) -> penrose::Result<()> {
+            state.extension::<ConfigWatcher>()?.borrow().grab_keys(x)
+        }
+    }
 }
 
-fn parse_keybindings(
-    bindings: HashMap<String, Box<dyn KeyEventHandler<RustConn>>>,
-    key_codes: &HashMap<String, u8>,
-) -> penrose::Result<KeyBindings<RustConn>> {
-    bindings
-        .into_iter()
-        .map(|(binding, handler)| parse_keybinding(&binding, key_codes).map(|key| (key, handler)))
-        .collect()
-}
+#[cfg(target_os = "macos")]
+mod platform {
+    use std::{collections::HashMap, process::Command as ProcessCommand};
 
-fn parse_keybinding(pattern: &str, key_codes: &HashMap<String, u8>) -> penrose::Result<KeyCode> {
-    let (modifiers, key_name) = pattern.rsplit_once('-').unwrap_or(("", pattern));
-    let code = key_codes
-        .get(key_name)
-        .ok_or_else(|| penrose::Error::UnknownKeyName {
-            name: key_name.to_owned(),
-        })?;
-    let mask = modifiers
-        .split('-')
-        .filter(|modifier| !modifier.is_empty())
-        .map(ModifierKey::try_from)
-        .try_fold(0, |mask, modifier| {
-            modifier.map(|modifier| mask | u16::from(modifier))
-        })?;
+    use anyhow::{Context, Result};
+    use penrose::core::{
+        bindings::{KeyBindings, KeyEventHandler},
+        conn::Conn,
+        hooks::{EventHook, StateHook},
+        State,
+    };
+    use penrosx::{Event as OsxEvent, OsxConn};
 
-    Ok(KeyCode { mask, code: *code })
+    use super::{ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher};
+
+    pub fn parse_raw_keybindings(
+        raw_bindings: HashMap<String, Box<dyn KeyEventHandler<OsxConn>>>,
+    ) -> Result<KeyBindings<OsxConn>> {
+        let supported_bindings = raw_bindings
+            .into_iter()
+            .filter(|(key, _)| match penrosx::HotKey::try_from(key.as_str()) {
+                Ok(_) => true,
+                Err(error) => {
+                    tracing::warn!(%key, %error, "skipping unsupported keybinding on macOS");
+                    false
+                }
+            })
+            .collect();
+
+        penrosx::try_parse_key_bindings(supported_bindings)
+            .context("parse keybindings for OsxConn")
+    }
+
+    pub fn grab_keys(watcher: &ConfigWatcher, conn: &mut OsxConn) -> penrose::Result<()> {
+        let keys = watcher.key_bindings.keys().copied().collect::<Vec<_>>();
+        conn.grab(&keys, &[])
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    pub fn wake_window_manager() -> Result<()> {
+        Ok(())
+    }
+
+    pub fn send_notification(summary: &str, body: &str) {
+        let script = format!("display notification {body:?} with title {summary:?}");
+        if let Err(error) = ProcessCommand::new("osascript").args(["-e", &script]).spawn() {
+            tracing::error!(%error, "send configuration notification");
+        }
+    }
+
+    impl EventHook<OsxConn> for ConfigKeybindingHook {
+        fn call(
+            &mut self,
+            event: &OsxEvent,
+            state: &mut State<OsxConn>,
+            conn: &mut OsxConn,
+        ) -> penrose::Result<bool> {
+            let watcher = state.extension::<ConfigWatcher>()?;
+            let mut watcher = watcher.borrow_mut();
+            watcher.reload_if_requested(conn);
+
+            if let OsxEvent::KeyPress { k } = event {
+                watcher.handle_keypress(*k, state, conn)?;
+            }
+
+            Ok(true)
+        }
+    }
+
+    impl StateHook<OsxConn> for ConfigKeybindingStartup {
+        fn call(
+            &mut self,
+            state: &mut State<OsxConn>,
+            conn: &mut OsxConn,
+        ) -> penrose::Result<()> {
+            state.extension::<ConfigWatcher>()?.borrow().grab_keys(conn)
+        }
+    }
 }
 
 pub struct ConfigWatcher {
     _watcher: RecommendedWatcher,
     _debounce_worker: JoinHandle<()>,
     changes: Receiver<()>,
-    key_bindings: KeyBindings<RustConn>,
+    key_bindings: KeyBindings<WmConn>,
     notifications: NotificationDebouncer,
     path: PathBuf,
 }
@@ -444,34 +636,11 @@ impl ConfigWatcher {
         })
     }
 
-    fn grab_keys(&self, x: &RustConn) -> penrose::Result<()> {
-        let keys = self.key_bindings.keys().copied().collect::<Vec<_>>();
-        let connection = x.connection();
-        let root = *x.root();
-
-        connection.ungrab_key(0, root, ModMask::ANY)?.check()?;
-
-        for modifier in [0, u16::from(ModMask::M2)] {
-            for key in &keys {
-                connection
-                    .grab_key(
-                        false,
-                        root,
-                        (key.mask | modifier).into(),
-                        key.code,
-                        GrabMode::ASYNC,
-                        GrabMode::ASYNC,
-                    )?
-                    .check()?;
-            }
-        }
-
-        connection.flush()?;
-
-        Ok(())
+    fn grab_keys(&self, conn: &mut WmConn) -> penrose::Result<()> {
+        platform::grab_keys(self, conn)
     }
 
-    fn reload_if_requested(&mut self, x: &RustConn) {
+    fn reload_if_requested(&mut self, conn: &mut WmConn) {
         if self.changes.try_iter().next().is_none() {
             return;
         }
@@ -479,7 +648,7 @@ impl ConfigWatcher {
         match load_key_bindings(&self.path) {
             Ok(key_bindings) => {
                 self.key_bindings = key_bindings;
-                if let Err(error) = self.grab_keys(x).context("grab_keys failed") {
+                if let Err(error) = self.grab_keys(conn).context("grab_keys failed") {
                     tracing::error!(?error, "grab reloaded keybindings");
                     self.notify(
                         "Keybindings not reloaded",
@@ -504,18 +673,18 @@ impl ConfigWatcher {
 
     fn notify(&mut self, summary: &str, body: &str) {
         if self.notifications.should_send(Instant::now()) {
-            send_notification(summary, body);
+            platform::send_notification(summary, body);
         }
     }
 
     fn handle_keypress(
         &mut self,
-        key: penrose::core::bindings::KeyCode,
-        state: &mut State<RustConn>,
-        x: &RustConn,
+        key: <WmConn as penrose::core::conn::Conn>::KeyBindingKey,
+        state: &mut State<WmConn>,
+        conn: &mut WmConn,
     ) -> penrose::Result<()> {
         if let Some(handler) = self.key_bindings.get_mut(&key) {
-            handler.call(state, x)?;
+            handler.call(state, conn)?;
         }
 
         Ok(())
@@ -538,7 +707,7 @@ fn debounce_writes(write_events: &Receiver<()>, changes: &Sender<()>) {
         while write_events.recv_timeout(RELOAD_DEBOUNCE).is_ok() {}
 
         if changes.send(()).is_ok() {
-            if let Err(error) = wake_window_manager() {
+            if let Err(error) = platform::wake_window_manager() {
                 tracing::error!(%error, "wake config reload handler");
             }
         }
@@ -566,64 +735,7 @@ impl NotificationDebouncer {
 
 pub struct ConfigKeybindingHook;
 
-impl EventHook<RustConn> for ConfigKeybindingHook {
-    fn call(
-        &mut self,
-        event: &XEvent,
-        state: &mut State<RustConn>,
-        x: &RustConn,
-    ) -> penrose::Result<bool> {
-        let watcher = state.extension::<ConfigWatcher>()?;
-        let mut watcher = watcher.borrow_mut();
-        watcher.reload_if_requested(x);
-
-        if let XEvent::KeyPress(key) = event {
-            watcher.handle_keypress(*key, state, x)?;
-        }
-
-        Ok(true)
-    }
-}
-
 pub struct ConfigKeybindingStartup;
-
-impl StateHook<RustConn> for ConfigKeybindingStartup {
-    fn call(&mut self, state: &mut State<RustConn>, x: &RustConn) -> penrose::Result<()> {
-        state.extension::<ConfigWatcher>()?.borrow().grab_keys(x)
-    }
-}
-
-fn wake_window_manager() -> Result<()> {
-    let (connection, _) = RustConnection::connect(None).context("connect to X server")?;
-    let root = connection
-        .setup()
-        .roots
-        .first()
-        .ok_or_else(|| anyhow!("X server did not report any screens"))?
-        .root;
-    let property = connection
-        .intern_atom(false, RELOAD_PROPERTY)
-        .context("intern reload property")?
-        .reply()
-        .context("resolve reload property")?
-        .atom;
-
-    connection
-        .change_property8(PropMode::REPLACE, root, property, AtomEnum::STRING, &[1])
-        .context("signal configuration reload")?;
-    connection.flush().context("flush reload signal")?;
-
-    Ok(())
-}
-
-fn send_notification(summary: &str, body: &str) {
-    if let Err(error) = ProcessCommand::new("notify-send")
-        .args(["--app-name", "favilo-penrose", summary, body])
-        .spawn()
-    {
-        tracing::error!(%error, "send configuration notification");
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -702,16 +814,19 @@ mod tests {
         assert!(rendered.contains("invalid type: integer `1`, expected a string"));
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn xmodmap_keycodes_parse_bindings_without_waiting_for_a_child() {
-        let key_codes = parse_xmodmap_keycodes(
+        use penrose::core::bindings::{KeyCode, ModifierKey};
+
+        let key_codes = platform::parse_xmodmap_keycodes(
             "keycode  36 = Return NoSymbol Return\nkeycode 172 = XF86AudioRaiseVolume NoSymbol XF86AudioRaiseVolume",
         )
         .expect("parse xmodmap output");
 
         assert_eq!(key_codes.get("Return"), Some(&36));
         assert_eq!(
-            parse_keybinding("M-Return", &key_codes).expect("parse configured binding"),
+            platform::parse_keybinding("M-Return", &key_codes).expect("parse configured binding"),
             KeyCode {
                 mask: u16::from(ModifierKey::Meta),
                 code: 36,
