@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, ensure, Result};
 use penrose::{
@@ -327,16 +327,41 @@ mod macosx {
             Ok(win.axui_elem().title().is_ok_and(|title| title == self.0))
         }
     }
+
+    /// Matches transient popovers, hover tooltips, menus, sheets, and non-standard windows on macOS.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct IsTransientPopover;
+
+    impl Query<OsxConn> for IsTransientPopover {
+        fn run(&self, id: WinId, conn: &mut OsxConn) -> Result<bool> {
+            let Ok(win) = conn.window(id) else {
+                return Ok(true);
+            };
+            let ax = win.axui_elem();
+
+            // Must have role "AXWindow" and subrole "AXStandardWindow" to be tiled
+            let is_ax_window = ax.role().is_ok_and(|role| role == "AXWindow");
+            let is_standard_subrole = ax
+                .subrole()
+                .is_ok_and(|subrole| subrole == "AXStandardWindow");
+
+            // Standard macOS windows have a close button; hover cards/tooltips/popovers do not
+            let has_close_button = ax.close_button().is_ok();
+
+            Ok(!(is_ax_window && is_standard_subrole && has_close_button))
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
 pub fn manage_hook<'a>() -> Box<dyn ManageHook<WmConn> + 'a> {
-    use macosx::{AppName, Title};
+    use macosx::{AppName, IsTransientPopover, Title};
     use penrose::extensions::hooks::manage::FloatingCentered;
 
     let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
     let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);
     let manage_hook = manage_hooks! {
+        IsTransientPopover => IgnoreWindow,
         AppName("zoom.us").and(zoom_titles.clone()) => DefaultTiled,
         AppName("zoom.us").and(zoom_titles.not()) => FloatingRelative(top_right_corner),
         AppName("Obsidian").and(
@@ -365,7 +390,22 @@ pub struct IgnoreWindow;
 
 impl<C: Conn> ManageHook<C> for IgnoreWindow {
     fn call(&mut self, client: WinId, state: &mut State<C>, _: &mut C) -> penrose::Result<()> {
+        let mut prev_focus_by_tag = HashMap::new();
+        for ws in state.client_set.workspaces() {
+            if let Some(stack) = ws.stack() {
+                if let Some(&other) = stack.iter().find(|&&id| id != client) {
+                    prev_focus_by_tag.insert(ws.tag().to_owned(), other);
+                }
+            }
+        }
         state.client_set.remove_client(&client);
+        for (tag, prev) in prev_focus_by_tag {
+            if let Some(ws) = state.client_set.workspace_mut(&tag) {
+                if let Some(stack) = ws.stack_mut() {
+                    stack.focus_element(&prev);
+                }
+            }
+        }
         Ok(())
     }
 }

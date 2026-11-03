@@ -72,6 +72,7 @@ pub struct MacosSessionState {
     matched_tags: HashMap<WinId, String>,
     matched_floating: HashMap<WinId, RelativeRect>,
     initial_refresh_pending: bool,
+    known_pids: HashSet<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +102,7 @@ impl MacosSessionState {
             matched_tags: HashMap::new(),
             matched_floating: HashMap::new(),
             initial_refresh_pending: true,
+            known_pids: HashSet::new(),
         }
     }
 }
@@ -142,7 +144,7 @@ fn claim_matching_window(
     }
 
     // 2. Exact owner + title match (across reboot/relaunch)
-    if let Some(title) = title {
+    if let Some(title) = title.filter(|t| !t.is_empty()) {
         if let Some((idx, snapshot)) = windows.iter().enumerate().find(|(idx, w)| {
             !restoring.claimed_indices.contains(idx)
                 && w.owner == owner
@@ -273,24 +275,107 @@ fn apply_workspace_and_screen_state(
     changed
 }
 
-/// Event hook that enables `AXManualAccessibility` when new applications launch or activate.
+/// Event hook that filters noisy macOS events and stabilizes focus across workspace/popup transitions.
 pub struct MacosSessionEventHook;
 
 impl penrose::core::hooks::EventHook<WmConn> for MacosSessionEventHook {
     fn call(
         &mut self,
         event: &penrosx::Event,
-        _state: &mut State<WmConn>,
+        state: &mut State<WmConn>,
         conn: &mut WmConn,
     ) -> penrose::Result<bool> {
-        if matches!(
-            event,
-            penrosx::Event::AppLaunched { .. } | penrosx::Event::AppActivated { .. }
-        ) {
-            enable_manual_accessibility_for_apps(conn);
-        }
+        use penrosx::Event;
 
-        Ok(true)
+        match *event {
+            Event::AppDeactivated { .. }
+            | Event::WindowMoved { .. }
+            | Event::WindowResized { .. } => Ok(false),
+
+            // When a new app launches, enable AXManualAccessibility for its PID once.
+            Event::AppLaunched { .. } => {
+                if let Ok(session_rc) = state.extension::<MacosSessionState>() {
+                    let mut session = session_rc.borrow_mut();
+                    enable_manual_accessibility_for_apps(conn, &mut session.known_pids);
+                }
+                Ok(true)
+            }
+
+            // When macOS fires AppActivated or FocusedWindowChanged:
+            // 1. If the app has a non-standard popup/menu/sheet focused, or if the focused window
+            //    is already the current client, skip OsxConn's handler so it doesn't synthesize
+            //    a mouse click on the main window (which immediately closes right-click menus)
+            //    or jump to another workspace during unlock/sleep wake.
+            // 2. Only allow AppActivated/FocusedWindowChanged to switch focus if the target
+            //    window is on a currently visible screen workspace (never auto-jump to a hidden
+            //    workspace just because a background app woke up after unlock!).
+            Event::AppActivated { pid } | Event::FocusedWindowChanged { pid } => {
+                if let Ok(session_rc) = state.extension::<MacosSessionState>() {
+                    let mut session = session_rc.borrow_mut();
+                    if !session.known_pids.contains(&pid) {
+                        enable_manual_accessibility_for_apps(conn, &mut session.known_pids);
+                    }
+                }
+
+                // Check if the current focused client already belongs to `pid`:
+                // If the user is already in this app (e.g. opening a right-click menu or hover card),
+                // do NOT run OsxConn::handle_event, which would re-sync all windows and call
+                // make_key_window (synthesizing a mouse click that dismisses context menus!).
+                if let Some(&focused_id) = state.client_set.current_client() {
+                    if conn.client_pid(focused_id) == Some(pid.cast_unsigned()) {
+                        return Ok(false);
+                    }
+                }
+
+                // Check if `pid` has a managed client on a currently visible screen workspace
+                let visible_candidates: Vec<WinId> = state
+                    .client_set
+                    .on_screen_workspace_clients()
+                    .copied()
+                    .collect();
+                let visible_client = visible_candidates
+                    .into_iter()
+                    .find(|&id| conn.client_pid(id) == Some(pid.cast_unsigned()));
+
+                let Some(target_id) = visible_client else {
+                    // The activated app has no window on the active workspace (e.g. background app
+                    // waking up after unlock or on another virtual workspace) -> ignore so we don't
+                    // flicker between workspaces!
+                    return Ok(false);
+                };
+
+                // Update internal Penrose focus to `target_id` without calling `make_key_window`
+                // (since macOS already activated the app/window that generated this event!).
+                state.client_set.focus_client(&target_id);
+                Ok(false)
+            }
+
+            // When WindowCreated fires (e.g. a Chrome hover card, right-click menu, or a real new window):
+            // Check if there are actually any new standard (non-transient) windows for `pid` before
+            // letting OsxConn::handle_event run `manage_new_windows` + `refresh` (which calls
+            // `make_key_window` and closes right-click menus!).
+            Event::WindowCreated { pid } => {
+                let old_ids: HashSet<WinId> = state.client_set.clients().copied().collect();
+                conn.update_known_apps_and_windows();
+                let window_ids: Vec<WinId> = conn.windows().keys().copied().collect();
+                let has_new_standard_window = window_ids.into_iter().any(|id| {
+                    conn.client_pid(id) == Some(pid.cast_unsigned())
+                        && !old_ids.contains(&id)
+                        && !is_transient_window(id, conn)
+                });
+
+                Ok(has_new_standard_window)
+            }
+
+            // When WindowDestroyed or UiElementDestroyed fires for a transient popover/menu that
+            // we never managed in `state.client_set`, skip OsxConn::handle_event so it doesn't
+            // trigger `unmanage` -> `refresh` -> `make_key_window`!
+            Event::WindowDestroyed { id } | Event::UiElementDestroyed { id } => {
+                Ok(state.client_set.contains(&id))
+            }
+
+            _ => Ok(true),
+        }
     }
 }
 
@@ -299,8 +384,6 @@ pub struct MacosSessionStartupHook;
 
 impl StateHook<WmConn> for MacosSessionStartupHook {
     fn call(&mut self, state: &mut State<WmConn>, conn: &mut WmConn) -> penrose::Result<()> {
-        enable_manual_accessibility_for_apps(conn);
-
         if !state.client_set.contains_tag(FALLBACK_HIDDEN_TAG) {
             let layouts = state.config.default_layouts.clone();
             let _ = state
@@ -312,6 +395,11 @@ impl StateHook<WmConn> for MacosSessionStartupHook {
             let path = state_file_path()
                 .map_err(|error| penrose::Error::Custom(format!("{error:#}")))?;
             state.add_extension(MacosSessionState::new(path));
+        }
+
+        if let Ok(session_rc) = state.extension::<MacosSessionState>() {
+            let mut session = session_rc.borrow_mut();
+            enable_manual_accessibility_for_apps(conn, &mut session.known_pids);
         }
 
         Ok(())
@@ -337,6 +425,10 @@ impl ManageHook<WmConn> for MacosSessionManageHook {
         let screens = conn.screen_details().unwrap_or_default();
         let bounds = conn.client_geometry(client).unwrap_or_default();
         let hidden_corner = is_at_hide_corner(bounds, &screens);
+
+        if is_transient_window(client, conn) {
+            return Ok(());
+        }
 
         if !session.initial_refresh_pending && !hidden_corner {
             return Ok(());
@@ -414,7 +506,7 @@ impl StateHook<WmConn> for MacosSessionRefreshHook {
     }
 }
 
-fn enable_manual_accessibility_for_apps(conn: &mut WmConn) {
+fn enable_manual_accessibility_for_apps(conn: &mut WmConn, known_pids: &mut HashSet<i32>) {
     use core_foundation::{
         base::{CFTypeRef, TCFType},
         boolean::CFBoolean,
@@ -434,26 +526,53 @@ fn enable_manual_accessibility_for_apps(conn: &mut WmConn) {
     conn.update_known_apps_and_windows();
     let attr = CFString::from_static_string("AXManualAccessibility");
     let val = CFBoolean::true_value();
+    let mut added_any = false;
 
-    for app in conn.apps().values() {
-        let elem = app.axui_elem();
-        unsafe {
-            let _ = AXUIElementSetAttributeValue(
-                elem.as_concrete_TypeRef().cast(),
-                attr.as_concrete_TypeRef(),
-                val.as_CFTypeRef(),
-            );
+    for (&pid, app) in conn.apps() {
+        if known_pids.insert(pid) {
+            let elem = app.axui_elem();
+            unsafe {
+                let _ = AXUIElementSetAttributeValue(
+                    elem.as_concrete_TypeRef().cast(),
+                    attr.as_concrete_TypeRef(),
+                    val.as_CFTypeRef(),
+                );
+            }
+            added_any = true;
         }
     }
-    conn.update_known_apps_and_windows();
+
+    if added_any {
+        conn.update_known_apps_and_windows();
+    }
+}
+
+fn is_transient_window(client: WinId, conn: &mut WmConn) -> bool {
+    use penrosx::AXUIElementAttributes;
+
+    let Ok(win) = conn.window(client) else {
+        return true;
+    };
+    let ax = win.axui_elem();
+    let is_ax_window = ax.role().is_ok_and(|role| role == "AXWindow");
+    let is_standard_subrole = ax
+        .subrole()
+        .is_ok_and(|subrole| subrole == "AXStandardWindow");
+    let has_close_button = ax.close_button().is_ok();
+
+    !(is_ax_window && is_standard_subrole && has_close_button)
 }
 
 fn window_identity(client: WinId, conn: &mut WmConn) -> (String, Option<String>) {
+    use penrosx::AXUIElementAttributes;
+
     if let Ok(win) = conn.window(client) {
-        (
-            win.owner().to_owned(),
-            win.window_name().map(str::to_owned),
-        )
+        let title = win
+            .window_name()
+            .map(str::to_owned)
+            .or_else(|| win.axui_elem().title().ok().map(|s| s.to_string()))
+            .filter(|t| !t.is_empty());
+        (win.owner().to_owned(), title)
     } else {
         (String::new(), conn.client_title(client).ok())
     }
@@ -484,6 +603,9 @@ fn snapshot_current_state(client_set: &StackSet<WinId>, conn: &mut WmConn) -> Pe
         );
 
         for &client in ws.clients() {
+            if is_transient_window(client, conn) {
+                continue;
+            }
             let (owner, title) = window_identity(client, conn);
             let floating = client_set
                 .screen_for_client(&client)
