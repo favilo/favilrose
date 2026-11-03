@@ -11,6 +11,11 @@ use penrose_ui::{
 
 use crate::{BAR_HEIGHT_PX, BLACK, BLUE, FONT, GREY, MAX_ACTIVE_WINDOW_CHARS, POINT_SIZE, WHITE};
 
+/// Build the status bar and its widgets.
+///
+/// # Errors
+///
+/// Returns an error if the status bar cannot initialize its fonts or widgets.
 pub fn status_bar<X: XConn>() -> penrose_ui::Result<StatusBar<X>> {
     let highlight: Color = BLUE.into();
     let empty_ws: Color = GREY.into();
@@ -29,7 +34,7 @@ pub fn status_bar<X: XConn>() -> penrose_ui::Result<StatusBar<X>> {
     StatusBar::try_new(
         Position::Top,
         BAR_HEIGHT_PX,
-        style.bg.unwrap_or_else(|| 0x000000.into()),
+        style.bg.unwrap_or_else(|| 0x0000_0000.into()),
         FONT,
         POINT_SIZE,
         vec![
@@ -61,7 +66,7 @@ fn current_weather_info(style: TextStyle) -> IntervalText {
     IntervalText::new(
         style,
         get_weather_text,
-        Duration::from_secs(60 * 5),
+        Duration::from_mins(5),
         false,
         false,
     )

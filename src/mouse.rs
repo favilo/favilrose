@@ -1,13 +1,15 @@
 use penrose::{
     builtin::actions::floating::{toggle_floating_focused, MouseDragHandler, MouseResizeHandler},
-    core::bindings::{click_handler, MouseBindings, MouseState},
+    core::{
+        bindings::{click_handler, MouseBindings, MouseState},
+        conn::Conn,
+    },
     map,
-    x::XConn,
 };
 
-pub fn mouse_bindings<X>() -> MouseBindings<X>
+pub fn mouse_bindings<C>() -> MouseBindings<C>
 where
-    X: XConn + 'static,
+    C: Conn + 'static,
 {
     use penrose::core::bindings::{
         ModifierKey::{Meta, Shift},
