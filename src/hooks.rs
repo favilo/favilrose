@@ -300,9 +300,39 @@ pub fn manage_hook<'a>() -> Box<dyn ManageHook<WmConn> + 'a> {
 }
 
 #[cfg(target_os = "macos")]
+mod macosx {
+    use penrose::{core::conn::Query, Result, WinId};
+    use penrosx::{AXUIElementAttributes, OsxConn};
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct AppName(pub &'static str);
+
+    impl Query<OsxConn> for AppName {
+        fn run(&self, id: WinId, conn: &mut OsxConn) -> Result<bool> {
+            let Ok(app) = conn.app_for_window(id) else {
+                return Ok(false);
+            };
+            Ok(app.axui_elem().title().is_ok_and(|title| title == self.0))
+        }
+    }
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct Title(pub &'static str);
+
+    impl Query<OsxConn> for Title {
+        fn run(&self, id: WinId, conn: &mut OsxConn) -> Result<bool> {
+            let Ok(win) = conn.window(id) else {
+                return Ok(false);
+            };
+            Ok(win.axui_elem().title().is_ok_and(|title| title == self.0))
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn manage_hook<'a>() -> Box<dyn ManageHook<WmConn> + 'a> {
+    use macosx::{AppName, Title};
     use penrose::extensions::hooks::manage::FloatingCentered;
-    use penrosx::query::{AppName, Title};
 
     let top_right_corner = RelativeRect::new(0.75, 0.0, 0.90, 0.10);
     let zoom_titles = OneOfQuery::new(ZOOM_TILE_TITLES, Title);

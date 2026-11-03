@@ -15,6 +15,7 @@ mod x11 {
     pub mod bar;
     pub type WmConn = penrose::x11rb::RustConn;
 
+    pub const BAR_HEIGHT_PX: u32 = 28;
     pub const FONT: &str = "ProFontIIx Nerd Font";
     pub const BLACK: u32 = 0x2828_28ff;
     pub const WHITE: u32 = 0xebdb_b2ff;
@@ -29,6 +30,7 @@ pub use x11::*;
 #[cfg(target_os = "macos")]
 mod macosx {
     pub type WmConn = penrosx::OsxConn;
+    pub const BAR_HEIGHT_PX: u32 = 0;
 }
 #[cfg(target_os = "macos")]
 pub use macosx::*;
@@ -41,4 +43,3 @@ pub mod layouts;
 pub mod mouse;
 
 pub const STARTUP_SCRIPT: &str = "/usr/local/scripts/penrose-startup.sh";
-pub const BAR_HEIGHT_PX: u32 = 28;

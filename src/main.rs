@@ -87,20 +87,34 @@ mod platform {
     use std::collections::HashMap;
 
     use anyhow::{anyhow, Context, Result};
-    use favilo_penrose::{config::ConfigWatcher, WmConn};
+    use favilo_penrose::{
+        config::ConfigWatcher,
+        extensions::macos_state::{
+            state_file_path, MacosSessionEventHook, MacosSessionManageHook,
+            MacosSessionRefreshHook, MacosSessionState, MacosSessionStartupHook,
+        },
+        WmConn,
+    };
     use penrose::core::{bindings::MouseBindings, Config};
     use penrosx::MainThreadMarker;
 
     pub fn run_wm(
-        config: Config<WmConn>,
+        mut config: Config<WmConn>,
         mouse_bindings: MouseBindings<WmConn>,
         keybinding_watcher: ConfigWatcher,
     ) -> Result<()> {
+        let session_state = MacosSessionState::new(state_file_path()?);
+        config.compose_or_set_startup_hook(MacosSessionStartupHook);
+        config.compose_or_set_event_hook(MacosSessionEventHook);
+        config.compose_or_set_manage_hook(MacosSessionManageHook);
+        config.compose_or_set_refresh_hook(MacosSessionRefreshHook);
+
         let mtm = MainThreadMarker::new().ok_or_else(|| anyhow!("must run on the main thread"))?;
         let conn = WmConn::try_new(mtm).context("OsxConn")?;
 
         conn.init_wm_and_run(mtm, config, HashMap::new(), mouse_bindings, move |wm| {
             wm.add_extension(keybinding_watcher);
+            wm.add_extension(session_state);
             Ok(())
         });
 

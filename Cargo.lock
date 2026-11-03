@@ -179,6 +179,7 @@ name = "favilo-penrose"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-foundation",
  "derive_more",
  "notify",
  "penrose",

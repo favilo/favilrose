@@ -21,6 +21,7 @@ tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
 penrosx = { git = "https://github.com/sminez/penrosx.git", branch = "develop" }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]

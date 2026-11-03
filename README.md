@@ -48,13 +48,20 @@ preserving focus.
 
 On macOS, `favilrose` uses [`penrosx`](https://github.com/sminez/penrosx) (`OsxConn`).
 
-1. Build and install:
+1. **(Recommended, one-time)** Create a self-signed code-signing certificate named `favilo-cert` in **Keychain Access** so macOS Accessibility permissions persist across rebuilds:
+   - Open **Keychain Access** → **Keychain Access → Certificate Assistant → Create a Certificate…**
+   - **Name**: `favilo-cert`
+   - **Identity Type**: `Self Signed Root`
+   - **Certificate Type**: `Code Signing`
+   - Click **Create**, then double-click `favilo-cert` in your **login** keychain → **Trust** → set **Code Signing** to **Always Trust**.
+2. Build and install:
    ```sh
    make && sudo make install
    ```
-   This installs `/usr/local/bin/favilo-penrose`, copies `services/launchd/com.favilo.penrose.plist` into `~/Library/LaunchAgents/`, and configures macOS Mission Control (`mru-spaces = false`, `spans-displays = false`).
-2. Grant Accessibility permissions to `/usr/local/bin/favilo-penrose` (or your terminal if running manually) in **System Settings → Privacy & Security → Accessibility**.
-3. Start the LaunchAgent:
+   This installs and signs `/usr/local/bin/favilo-penrose` (with identifier `com.favilo.penrose` and certificate `favilo-cert` if present), copies `services/launchd/com.favilo.penrose.plist` into `~/Library/LaunchAgents/`, and configures macOS Mission Control (`mru-spaces = false`, `spans-displays = false`).
+3. Grant Accessibility permissions to `/usr/local/bin/favilo-penrose` (or your terminal if running manually) in **System Settings → Privacy & Security → Accessibility**.
+   *(If upgrading from an older ad-hoc signed build, remove the old `favilo-penrose` entry with the `-` button first so macOS picks up the new certificate.)*
+4. Start the LaunchAgent:
    ```sh
    launchctl load ~/Library/LaunchAgents/com.favilo.penrose.plist
    ```

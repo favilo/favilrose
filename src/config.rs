@@ -101,69 +101,64 @@ pub struct PenroseConfig {
 
 impl Default for PenroseConfig {
     fn default() -> Self {
+        let mut keybindings = BTreeMap::from([
+            binding("M-h", Action::FocusDirection(Direction::Left)),
+            binding("M-j", Action::FocusDirection(Direction::Down)),
+            binding("M-k", Action::FocusDirection(Direction::Up)),
+            binding("M-l", Action::FocusDirection(Direction::Right)),
+            binding("M-S-h", Action::MoveDirection(Direction::Left)),
+            binding("M-S-j", Action::MoveDirection(Direction::Down)),
+            binding("M-S-k", Action::MoveDirection(Direction::Up)),
+            binding("M-S-l", Action::MoveDirection(Direction::Right)),
+            binding("M-S-c", Action::KillFocused),
+            binding("M-t", Action::SinkFocused),
+            binding("M-Tab", Action::ToggleTag),
+            binding("M-bracketright", Action::NextScreen),
+            binding("M-bracketleft", Action::PreviousScreen),
+            binding("M-grave", Action::NextLayout),
+            binding("M-S-grave", Action::PreviousLayout),
+            binding("M-S-comma", Action::IncreaseMain),
+            binding("M-S-period", Action::DecreaseMain),
+            binding("M-S-Up", Action::IncreaseMain),
+            binding("M-S-Down", Action::DecreaseMain),
+            binding("M-S-Right", Action::ExpandMain),
+            binding("M-S-Left", Action::ShrinkMain),
+            binding("M-S-z", Action::LockAndSuspend),
+            binding("M-r", Action::Launcher),
+            binding(platform::DEFAULT_TERMINAL_KEY, Action::Terminal),
+            binding(platform::DEFAULT_RESTART_KEY, Action::Restart),
+            binding(platform::DEFAULT_QUIT_KEY, Action::Quit),
+            binding("M-F10", Action::Screenshot),
+            binding("M-1", Action::FocusTag(1)),
+            binding("M-S-1", Action::MoveFocusTo(1)),
+            binding("M-2", Action::FocusTag(2)),
+            binding("M-S-2", Action::MoveFocusTo(2)),
+            binding("M-3", Action::FocusTag(3)),
+            binding("M-S-3", Action::MoveFocusTo(3)),
+            binding("M-4", Action::FocusTag(4)),
+            binding("M-S-4", Action::MoveFocusTo(4)),
+            binding("M-5", Action::FocusTag(5)),
+            binding("M-S-5", Action::MoveFocusTo(5)),
+            binding("M-6", Action::FocusTag(6)),
+            binding("M-S-6", Action::MoveFocusTo(6)),
+            binding("M-7", Action::FocusTag(7)),
+            binding("M-S-7", Action::MoveFocusTo(7)),
+            binding("M-8", Action::FocusTag(8)),
+            binding("M-S-8", Action::MoveFocusTo(8)),
+            binding("M-9", Action::FocusTag(9)),
+            binding("M-S-9", Action::MoveFocusTo(9)),
+            binding("M-0", Action::FocusTag(0)),
+            binding("M-S-0", Action::MoveFocusTo(0)),
+        ]);
+        keybindings.extend(platform::extra_default_keybindings());
+
         Self {
-            keybindings: BTreeMap::from([
-                binding("M-h", Action::FocusDirection(Direction::Left)),
-                binding("M-j", Action::FocusDirection(Direction::Down)),
-                binding("M-k", Action::FocusDirection(Direction::Up)),
-                binding("M-l", Action::FocusDirection(Direction::Right)),
-                binding("M-S-h", Action::MoveDirection(Direction::Left)),
-                binding("M-S-j", Action::MoveDirection(Direction::Down)),
-                binding("M-S-k", Action::MoveDirection(Direction::Up)),
-                binding("M-S-l", Action::MoveDirection(Direction::Right)),
-                binding("M-S-c", Action::KillFocused),
-                binding("M-t", Action::SinkFocused),
-                binding("M-Tab", Action::ToggleTag),
-                binding("M-bracketright", Action::NextScreen),
-                binding("M-bracketleft", Action::PreviousScreen),
-                binding("M-grave", Action::NextLayout),
-                binding("M-S-grave", Action::PreviousLayout),
-                binding("M-S-comma", Action::IncreaseMain),
-                binding("M-S-period", Action::DecreaseMain),
-                binding("M-S-Up", Action::IncreaseMain),
-                binding("M-S-Down", Action::DecreaseMain),
-                binding("M-S-Right", Action::ExpandMain),
-                binding("M-S-Left", Action::ShrinkMain),
-                binding("M-S-z", Action::LockAndSuspend),
-                binding("M-r", Action::Launcher),
-                binding("M-Return", Action::Terminal),
-                binding("M-q", Action::Restart),
-                binding("M-S-q", Action::Quit),
-                binding("XF86AudioRaiseVolume", Action::VolumeUp),
-                binding("XF86AudioLowerVolume", Action::VolumeDown),
-                binding("XF86AudioMute", Action::VolumeMute),
-                binding("XF86AudioPlay", Action::MediaPlayPause),
-                binding("XF86AudioNext", Action::MediaNext),
-                binding("XF86AudioPrev", Action::MediaPrevious),
-                binding("XF86MonBrightnessUp", Action::BrightnessUp),
-                binding("XF86MonBrightnessDown", Action::BrightnessDown),
-                binding("M-F10", Action::Screenshot),
-                binding("M-1", Action::FocusTag(1)),
-                binding("M-S-1", Action::MoveFocusTo(1)),
-                binding("M-2", Action::FocusTag(2)),
-                binding("M-S-2", Action::MoveFocusTo(2)),
-                binding("M-3", Action::FocusTag(3)),
-                binding("M-S-3", Action::MoveFocusTo(3)),
-                binding("M-4", Action::FocusTag(4)),
-                binding("M-S-4", Action::MoveFocusTo(4)),
-                binding("M-5", Action::FocusTag(5)),
-                binding("M-S-5", Action::MoveFocusTo(5)),
-                binding("M-6", Action::FocusTag(6)),
-                binding("M-S-6", Action::MoveFocusTo(6)),
-                binding("M-7", Action::FocusTag(7)),
-                binding("M-S-7", Action::MoveFocusTo(7)),
-                binding("M-8", Action::FocusTag(8)),
-                binding("M-S-8", Action::MoveFocusTo(8)),
-                binding("M-9", Action::FocusTag(9)),
-                binding("M-S-9", Action::MoveFocusTo(9)),
-                binding("M-0", Action::FocusTag(0)),
-                binding("M-S-0", Action::MoveFocusTo(0)),
-            ]),
+            keybindings,
             programs: BTreeMap::from([
                 program(Program::Lock, "i3lock"),
                 program(Program::Suspend, "systemctl suspend-then-hibernate"),
                 program(Program::Launcher, "dmenu_run"),
-                program(Program::Terminal, "wezterm"),
+                program(Program::Terminal, platform::DEFAULT_TERMINAL_PROGRAM),
                 program(Program::Quit, "pkill -fi penrose"),
                 program(
                     Program::VolumeUp,
@@ -339,9 +334,28 @@ mod platform {
         wrapper::ConnectionExt as _,
     };
 
-    use super::{ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher};
+    use super::{
+        binding, Action, ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher, Keybinding,
+    };
 
     const RELOAD_PROPERTY: &[u8] = b"_FAVILROSE_CONFIG_RELOAD";
+    pub const DEFAULT_TERMINAL_KEY: &str = "M-Return";
+    pub const DEFAULT_RESTART_KEY: &str = "M-q";
+    pub const DEFAULT_QUIT_KEY: &str = "M-S-q";
+    pub const DEFAULT_TERMINAL_PROGRAM: &str = "wezterm";
+
+    pub fn extra_default_keybindings() -> Vec<(Keybinding, Action)> {
+        vec![
+            binding("XF86AudioRaiseVolume", Action::VolumeUp),
+            binding("XF86AudioLowerVolume", Action::VolumeDown),
+            binding("XF86AudioMute", Action::VolumeMute),
+            binding("XF86AudioPlay", Action::MediaPlayPause),
+            binding("XF86AudioNext", Action::MediaNext),
+            binding("XF86AudioPrev", Action::MediaPrevious),
+            binding("XF86MonBrightnessUp", Action::BrightnessUp),
+            binding("XF86MonBrightnessDown", Action::BrightnessDown),
+        ]
+    }
 
     pub fn parse_raw_keybindings(
         raw_bindings: HashMap<String, Box<dyn KeyEventHandler<RustConn>>>,
@@ -511,9 +525,13 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use std::{collections::HashMap, process::Command as ProcessCommand};
+    use std::{
+        collections::HashMap,
+        process::Command as ProcessCommand,
+        sync::{mpsc::Sender, OnceLock},
+    };
 
-    use anyhow::{Context, Result};
+    use anyhow::{anyhow, Context, Result};
     use penrose::core::{
         bindings::{KeyBindings, KeyEventHandler},
         conn::Conn,
@@ -522,18 +540,48 @@ mod platform {
     };
     use penrosx::{Event as OsxEvent, OsxConn};
 
-    use super::{ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher};
+    use super::{
+         Action, ConfigKeybindingHook, ConfigKeybindingStartup, ConfigWatcher, Keybinding,
+    };
+
+    static OSX_EVENT_TX: OnceLock<Sender<OsxEvent>> = OnceLock::new();
+    pub const DEFAULT_TERMINAL_KEY: &str = "M-Enter";
+    pub const DEFAULT_RESTART_KEY: &str = "M-A-q";
+    pub const DEFAULT_QUIT_KEY: &str = "M-S-A-q";
+    pub const DEFAULT_TERMINAL_PROGRAM: &str = "open -na iTerm";
+
+    pub fn extra_default_keybindings() -> Vec<(Keybinding, Action)> {
+        Vec::new()
+    }
+
+    pub(super) fn normalize_keybinding(key: &str) -> String {
+        let (modifiers, key_name) = key.rsplit_once('-').unwrap_or(("", key));
+        let normalized_name = match key_name {
+            "Return" => "Enter",
+            "grave" => "backquote",
+            other => other,
+        };
+
+        if modifiers.is_empty() {
+            normalized_name.to_owned()
+        } else {
+            format!("{modifiers}-{normalized_name}")
+        }
+    }
 
     pub fn parse_raw_keybindings(
         raw_bindings: HashMap<String, Box<dyn KeyEventHandler<OsxConn>>>,
     ) -> Result<KeyBindings<OsxConn>> {
         let supported_bindings = raw_bindings
             .into_iter()
-            .filter(|(key, _)| match penrosx::HotKey::try_from(key.as_str()) {
-                Ok(_) => true,
-                Err(error) => {
-                    tracing::warn!(%key, %error, "skipping unsupported keybinding on macOS");
-                    false
+            .filter_map(|(key, handler)| {
+                let normalized = normalize_keybinding(&key);
+                match penrosx::HotKey::try_from(normalized.as_str()) {
+                    Ok(_) => Some((normalized, handler)),
+                    Err(error) => {
+                        tracing::warn!(%key, %error, "skipping unsupported keybinding on macOS");
+                        None
+                    }
                 }
             })
             .collect();
@@ -547,8 +595,12 @@ mod platform {
         conn.grab(&keys, &[])
     }
 
-    #[allow(clippy::unnecessary_wraps)]
     pub fn wake_window_manager() -> Result<()> {
+        if let Some(tx) = OSX_EVENT_TX.get() {
+            tx.send(OsxEvent::AppDeactivated { pid: 0 })
+                .map_err(|error| anyhow!("send wakeup event to OsxConn: {error}"))?;
+        }
+
         Ok(())
     }
 
@@ -584,6 +636,7 @@ mod platform {
             state: &mut State<OsxConn>,
             conn: &mut OsxConn,
         ) -> penrose::Result<()> {
+            let _ = OSX_EVENT_TX.set(conn.event_tx());
             state.extension::<ConfigWatcher>()?.borrow().grab_keys(conn)
         }
     }
@@ -748,7 +801,9 @@ mod tests {
         let parsed = toml::from_str::<PenroseConfig>(&serialized)
             .expect("deserialize default configuration");
 
-        assert!(serialized.contains("M-Return = \"terminal\""));
+        let expected_terminal_binding =
+            format!("{} = \"terminal\"", platform::DEFAULT_TERMINAL_KEY);
+        assert!(serialized.contains(&expected_terminal_binding));
         assert!(serialized.contains("[keybindings.M-1]\nfocus_tag = 1"));
         assert!(serialized.contains("[keybindings.M-h]\nfocus_direction = \"left\""));
         parsed.validate().expect("validate default configuration");
@@ -770,7 +825,7 @@ mod tests {
 
         assert_eq!(
             config.command(Program::Terminal).expect("terminal command"),
-            Command("wezterm".to_owned())
+            Command(platform::DEFAULT_TERMINAL_PROGRAM.to_owned())
         );
         assert_eq!(
             config.keybindings.get(&Keybinding("M-1".to_owned())),
@@ -832,6 +887,18 @@ mod tests {
                 code: 36,
             }
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keybinding_normalizes_x11_key_names() {
+        assert_eq!(platform::normalize_keybinding("M-Return"), "M-Enter");
+        assert_eq!(platform::normalize_keybinding("M-grave"), "M-backquote");
+        assert_eq!(
+            platform::normalize_keybinding("M-S-grave"),
+            "M-S-backquote"
+        );
+        assert_eq!(platform::normalize_keybinding("M-Enter"), "M-Enter");
     }
 
     #[test]
